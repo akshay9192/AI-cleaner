@@ -10,7 +10,7 @@ Statuses are evidence-based: **pending**, **in progress**, **verified**, or **bl
 |---|---|---|---|---|---|
 | R01 | M1 root and filesystem boundary validation; M0 | `src/ai_cleaner/platform/windows_fs.py` | Only supported, explicit project roots and same-volume recovery | Native root/boundary/handle matrix: 7 passed | verified |
 | R02 | M2 bounded cancellable read-only inventory; M1 | `src/ai_cleaner/services/scan.py` | No inspected-file mutation; incomplete scans explicit | Read-only/cancel/limit/link tests passed in 13-test gate | verified |
-| R03 | M3 protection, pins, Git, explanations; M2 | `src/ai_cleaner/services/classify.py` | Protected never selectable; unknown remains unknown | Pending M3 tests | pending |
+| R03 | M3 protection, pins, Git, explanations; M2 | `src/ai_cleaner/services/classify.py` | Protected never selectable; unknown remains unknown | Mixed valuables, pins, real Git/NUL and Git-failure tests: 4 passed | verified |
 | R04 | M4 task snapshots/declarations; M3 | `src/ai_cleaner/services/tasks.py` | Honest observed-during-task diff and active-task block | Pending M4 tests | pending |
 | R05 | M5 immutable proposals and stale checks; M4 | `src/ai_cleaner/services/proposals.py` | Exact digest; changed state requires new review | Pending M5 tests | pending |
 | R06 | M5/M9 ephemeral desktop approval; M4/M8 | `src/ai_cleaner/domain/approval.py`, `src/ai_cleaner/ui/` | Missing/cancelled/stale/replayed approval cannot mutate | Pending M5/M9 tests | pending |
@@ -32,7 +32,7 @@ Statuses are evidence-based: **pending**, **in progress**, **verified**, or **bl
 | M0 | Foundation | Frozen sync passed; doctor/help passed; Ruff passed; mypy passed; pytest 2 passed | Windows 11 x64 / Python 3.12.6 | None for M0 | verified |
 | M1 | Windows safety adapter | Ruff/mypy passed; `pytest tests/windows/test_windows_fs.py`: 7 passed | Windows 11 x64 / NTFS | Other acceptance cases continue in M6–M8 | verified |
 | M2 | Storage and scanner | Ruff/mypy passed; integration+Windows pytest: 13 passed | Windows 11 x64 / NTFS | None for M2 | verified |
-| M3 | Classification | Mixed-project and Git failure tests | Windows 11 x64 | Not implemented | pending |
+| M3 | Classification | Ruff/mypy passed; policy tests: 4 passed | Windows 11 x64 | None for M3 | verified |
 | M4 | Task lifecycle | Task diff and CLI tests | Windows 11 x64 | Not implemented | pending |
 | M5 | Proposal/approval | State-machine adversarial tests | Windows 11 x64 | Not implemented | pending |
 | M6 | Quarantine | Native failure-injection tests | Windows 11 x64 | Not implemented | pending |

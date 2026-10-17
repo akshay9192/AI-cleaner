@@ -246,3 +246,29 @@ class Database:
                 ),
             )
             return project_id
+
+    def add_protection(
+        self,
+        *,
+        protection_id: str,
+        project_id: str,
+        relative_path: str,
+        reason: str,
+        origin: str,
+        created_at: str,
+    ) -> None:
+        with self.transaction(immediate=True) as connection:
+            connection.execute(
+                """INSERT OR IGNORE INTO protections
+                   (id, project_id, relative_path, reason, origin, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (protection_id, project_id, relative_path, reason, origin, created_at),
+            )
+
+    def protections(self, project_id: str) -> dict[str, str]:
+        with self.connect() as connection:
+            rows = connection.execute(
+                "SELECT relative_path, reason FROM protections WHERE project_id = ?",
+                (project_id,),
+            ).fetchall()
+        return {str(row["relative_path"]).casefold(): str(row["reason"]) for row in rows}

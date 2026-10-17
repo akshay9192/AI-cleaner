@@ -13,6 +13,14 @@ class ScanStatus(StrEnum):
     PARTIAL = "partial"
 
 
+class Category(StrEnum):
+    PROTECTED = "protected"
+    SUGGESTED_INTERMEDIATE = "suggested-intermediate"
+    REGISTERED_TASK_SCRATCH = "registered-task-scratch"
+    UNKNOWN = "unknown"
+    UNSUPPORTED = "unsupported"
+
+
 @dataclass(frozen=True, slots=True)
 class FileObservation:
     relative_path: str
@@ -60,4 +68,24 @@ class ScanResult:
             "visited_entries": self.visited_entries,
             "files": [item.to_dict() for item in self.observations],
             "issues": [issue.to_dict() for issue in self.issues],
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class ClassifiedFile:
+    observation: FileObservation
+    category: Category
+    reason_code: str
+    explanation: str
+    ownership_evidence: str
+    selectable: bool
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            **self.observation.to_dict(),
+            "category": self.category.value,
+            "reason_code": self.reason_code,
+            "explanation": self.explanation,
+            "ownership_evidence": self.ownership_evidence,
+            "selectable": self.selectable,
         }
