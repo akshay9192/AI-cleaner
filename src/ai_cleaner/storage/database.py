@@ -5,6 +5,7 @@ import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
+from typing import cast
 
 from ai_cleaner.domain.models import ScanResult
 
@@ -272,3 +273,35 @@ class Database:
                 (project_id,),
             ).fetchall()
         return {str(row["relative_path"]).casefold(): str(row["reason"]) for row in rows}
+
+    def project_by_root(self, root: Path) -> sqlite3.Row | None:
+        with self.connect() as connection:
+            return cast(
+                sqlite3.Row | None,
+                connection.execute(
+                    "SELECT * FROM projects WHERE root = ? COLLATE NOCASE",
+                    (str(root.absolute()),),
+                ).fetchone(),
+            )
+
+    def task(self, task_id: str) -> sqlite3.Row | None:
+        with self.connect() as connection:
+            return cast(
+                sqlite3.Row | None,
+                connection.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone(),
+            )
+
+    def task_declarations(self, task_id: str) -> dict[str, str]:
+        with self.connect() as connection:
+            rows = connection.execute(
+                "SELECT relative_path, role FROM artifact_declarations WHERE task_id = ?",
+                (task_id,),
+            ).fetchall()
+        return {str(row["relative_path"]): str(row["role"]) for row in rows}
+
+    def observations(self, scan_id: str) -> dict[str, sqlite3.Row]:
+        with self.connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM observations WHERE scan_id = ?", (scan_id,)
+            ).fetchall()
+        return {str(row["relative_path"]).casefold(): row for row in rows}

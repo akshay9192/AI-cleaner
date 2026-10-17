@@ -17,6 +17,7 @@ from ai_cleaner.platform.windows_fs import (
     WindowsFilesystem,
 )
 from ai_cleaner.services.scan import DEFAULT_ENTRY_LIMIT, Scanner
+from ai_cleaner.services.tasks import TaskConflictError, TaskService
 from ai_cleaner.storage.config import StatePaths
 from ai_cleaner.storage.database import Database
 
@@ -52,6 +53,20 @@ def build_parser() -> argparse.ArgumentParser:
     scan.add_argument("--json", action="store_true", help="emit JSON to stdout")
     scan.add_argument("--limit", type=int, default=DEFAULT_ENTRY_LIMIT)
     scan.add_argument("--state-dir", type=Path, help=argparse.SUPPRESS)
+    task = subparsers.add_parser("task", help="manage cooperative task snapshots")
+    task_subparsers = task.add_subparsers(dest="task_command", required=True)
+    task_start = task_subparsers.add_parser("start", help="capture a task baseline")
+    task_start.add_argument("--root", required=True, type=Path)
+    task_start.add_argument("--label", required=True)
+    task_start.add_argument("--state-dir", type=Path, help=argparse.SUPPRESS)
+    task_register = task_subparsers.add_parser("register", help="declare a task artifact")
+    task_register.add_argument("--task", required=True)
+    task_register.add_argument("--path", required=True)
+    task_register.add_argument("--role", required=True, choices=("scratch", "deliverable", "input"))
+    task_register.add_argument("--state-dir", type=Path, help=argparse.SUPPRESS)
+    task_finish = task_subparsers.add_parser("finish", help="capture the task end snapshot")
+    task_finish.add_argument("--task", required=True)
+    task_finish.add_argument("--state-dir", type=Path, help=argparse.SUPPRESS)
     gui = subparsers.add_parser("gui", help="open the desktop application")
     gui.add_argument("--root", type=Path)
     return parser
@@ -100,12 +115,50 @@ def _scan(args: argparse.Namespace) -> int:
         return 1
 
 
+def _task(args: argparse.Namespace) -> int:
+    try:
+        state = StatePaths.discover(args.state_dir)
+        state.ensure()
+        database = Database(state.database)
+        database.migrate()
+        filesystem = WindowsFilesystem()
+        service = TaskService(database, filesystem, Scanner(filesystem))
+        if args.task_command == "start":
+            task_id = service.start(
+                args.root,
+                args.label,
+                excluded_roots=(state.root, state.recovery),
+            )
+            print(json.dumps({"task_id": task_id, "status": "active"}, sort_keys=True))
+        elif args.task_command == "register":
+            service.register(args.task, args.path, args.role)
+            print(json.dumps({"task_id": args.task, "registered": args.path, "role": args.role}))
+        else:
+            result = service.finish(args.task, excluded_roots=(state.root, state.recovery))
+            print(json.dumps(result.to_dict(), sort_keys=True))
+        return 0
+    except (ValueError, BoundaryError) as error:
+        print(str(error), file=sys.stderr)
+        return 2
+    except UnsupportedFilesystemError as error:
+        print(str(error), file=sys.stderr)
+        return 3
+    except TaskConflictError as error:
+        print(str(error), file=sys.stderr)
+        return 5
+    except OSError as error:
+        print(str(error), file=sys.stderr)
+        return 1
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "doctor":
         return _doctor(args.json)
     if args.command == "scan":
         return _scan(args)
+    if args.command == "task":
+        return _task(args)
     if args.command == "gui":
         from ai_cleaner.ui.app import main as gui_main
 
