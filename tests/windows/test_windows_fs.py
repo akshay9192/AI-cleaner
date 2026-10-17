@@ -41,7 +41,12 @@ def test_roots_and_handle_move_are_same_volume_and_non_overwriting(
     digest = hashlib.sha256(b"fixture-data").hexdigest()
 
     moved = fs.guarded_move(
-        source, payload, root=project, expected=expected, expected_sha256=digest
+        source,
+        payload,
+        root=project,
+        destination_root=recovery,
+        expected=expected,
+        expected_sha256=digest,
     )
 
     assert not source.exists()
@@ -101,6 +106,25 @@ def test_symlink_escape_is_rejected(fs: WindowsFilesystem, tmp_path: Path) -> No
     with pytest.raises(UnsupportedFilesystemError):
         fs.validate_candidate(link / "secret.tmp", project)
     assert secret.read_text(encoding="utf-8") == "keep"
+
+
+def test_restore_destination_link_escape_is_rejected(
+    fs: WindowsFilesystem, tmp_path: Path
+) -> None:
+    project, _ = roots(tmp_path)
+    outside = tmp_path / "outside-restore"
+    outside.mkdir()
+    link = project / "restore-link"
+    try:
+        link.symlink_to(outside, target_is_directory=True)
+    except OSError:
+        _winapi.CreateJunction(str(outside), str(link))
+    volume = fs.inspect(project).volume_serial
+
+    with pytest.raises(UnsupportedFilesystemError):
+        fs.validate_destination(link / "escaped.tmp", project, expected_volume=volume)
+
+    assert not (outside / "escaped.tmp").exists()
 
 
 def test_exclusive_handle_blocks_conflicting_open(

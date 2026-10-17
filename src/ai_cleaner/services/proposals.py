@@ -38,6 +38,11 @@ class ProposalService:
         if not selected:
             raise ProposalError("select at least one eligible item")
         self.filesystem.validate_roots(root, recovery_root)
+        unresolved = self.database.unresolved_task(project_id)
+        if unresolved is not None:
+            raise ProposalError(
+                "active or interrupted tasks must be finished before cleanup review"
+            )
         if task_id:
             task = self.database.task(task_id)
             if task is None:

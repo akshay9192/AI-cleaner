@@ -383,6 +383,28 @@ class WindowsFilesystem:
         self._reject_extra_streams(path)
         return identity
 
+    def validate_destination(
+        self, destination: Path, root: Path, *, expected_volume: int
+    ) -> FileIdentity:
+        """Validate an absent destination and its existing parent against a root."""
+        destination = destination.absolute()
+        root = root.absolute()
+        if destination.exists():
+            raise FileExistsError(destination)
+        if not destination.parent.is_dir():
+            raise BoundaryError("destination parent must already exist")
+        if ":" in destination.name:
+            raise UnsupportedFilesystemError("alternate data stream destinations are unsupported")
+        self._reject_reparse_chain(root)
+        self._reject_reparse_chain(destination.parent)
+        root_identity = self.inspect(root)
+        parent_identity = self.inspect(destination.parent)
+        if not _is_within(parent_identity.final_path, root_identity.final_path):
+            raise BoundaryError("destination parent resolves outside the approved root")
+        if parent_identity.volume_serial != expected_volume:
+            raise UnsupportedFilesystemError("cross-volume move is not supported")
+        return parent_identity
+
     def _reject_extra_streams(self, path: Path) -> None:
         class WIN32_FIND_STREAM_DATA(ctypes.Structure):
             _fields_ = [
@@ -434,16 +456,44 @@ class WindowsFilesystem:
                 return digest.hexdigest()
             digest.update(buffer.raw[: read.value])
 
+    def read_handle_prefix(self, handle: WindowsHandle, limit: int) -> bytes:
+        """Read at most limit bytes from an already validated, exclusively opened file."""
+        if limit < 0:
+            raise ValueError("read limit must be non-negative")
+        assert kernel32 is not None
+        position = ctypes.c_longlong(0)
+        if not kernel32.SetFilePointerEx(
+            wintypes.HANDLE(handle.value), ctypes.c_longlong(0), ctypes.byref(position), 0
+        ):
+            _raise_last_error("SetFilePointerEx", handle.path)
+        if limit == 0:
+            return b""
+        buffer = ctypes.create_string_buffer(limit)
+        read = wintypes.DWORD()
+        if not kernel32.ReadFile(
+            wintypes.HANDLE(handle.value), buffer, limit, ctypes.byref(read), None
+        ):
+            _raise_last_error("ReadFile", handle.path)
+        return buffer.raw[: read.value]
+
     def move_open_file(
         self,
         handle: WindowsHandle,
         destination: Path,
         *,
         expected: FileIdentity,
+        destination_root: Path | None = None,
     ) -> FileIdentity:
         observed = self.identity_from_handle(handle)
         if observed != expected:
             raise FileChangedError("file identity or metadata changed before move")
+        expected_parent = (
+            self.validate_destination(
+                destination, destination_root, expected_volume=expected.volume_serial
+            )
+            if destination_root is not None
+            else None
+        )
         if destination.exists():
             raise FileExistsError(destination)
         with ExitStack() as stack:
@@ -457,6 +507,8 @@ class WindowsFilesystem:
             )
             parent = stack.enter_context(self.open_handle(destination.parent, directory=True))
             parent_id = self.identity_from_handle(parent)
+            if expected_parent is not None and parent_id != expected_parent:
+                raise FileChangedError("destination parent changed before move")
             if parent_id.volume_serial != expected.volume_serial:
                 raise UnsupportedFilesystemError("cross-volume move is not supported")
             # SetFileInformationByHandle currently rejects its documented relative-name/
@@ -508,6 +560,7 @@ class WindowsFilesystem:
         destination: Path,
         *,
         root: Path,
+        destination_root: Path,
         expected: FileIdentity,
         expected_sha256: str,
     ) -> FileIdentity:
@@ -518,4 +571,9 @@ class WindowsFilesystem:
                 raise FileChangedError("file changed since proposal preparation")
             if self.hash_handle(handle) != expected_sha256:
                 raise FileChangedError("file content changed since proposal preparation")
-            return self.move_open_file(handle, destination, expected=expected)
+            return self.move_open_file(
+                handle,
+                destination,
+                expected=expected,
+                destination_root=destination_root,
+            )

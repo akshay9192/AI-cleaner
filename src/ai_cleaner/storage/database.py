@@ -309,6 +309,18 @@ class Database:
                 connection.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone(),
             )
 
+    def unresolved_task(self, project_id: str) -> sqlite3.Row | None:
+        with self.connect() as connection:
+            return cast(
+                sqlite3.Row | None,
+                connection.execute(
+                    """SELECT * FROM tasks WHERE project_id = ?
+                       AND status IN ('active', 'interrupted')
+                       ORDER BY started_at DESC LIMIT 1""",
+                    (project_id,),
+                ).fetchone(),
+            )
+
     def task_declarations(self, task_id: str) -> dict[str, str]:
         with self.connect() as connection:
             rows = connection.execute(
@@ -540,7 +552,20 @@ class Database:
                    GROUP BY r.id ORDER BY r.started_at DESC""",
                 (project_id,),
             ).fetchall()
-        return [dict(row) for row in rows]
+        history: list[dict[str, object]] = []
+        with self.connect() as connection:
+            for row in rows:
+                entry = dict(row)
+                entry["items"] = [
+                    dict(item)
+                    for item in connection.execute(
+                        """SELECT source, destination, outcome, error, completed_at
+                           FROM operation_items WHERE run_id = ? ORDER BY intent_at""",
+                        (row["id"],),
+                    ).fetchall()
+                ]
+                history.append(entry)
+        return history
 
 
 def utc_timestamp() -> str:

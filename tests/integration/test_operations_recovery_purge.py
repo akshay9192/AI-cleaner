@@ -136,6 +136,27 @@ def test_exact_approved_files_move_and_report_quarantine_not_reclamation(
     assert Path(str(rows[0]["payload_path"])).read_bytes() == b"one"
 
 
+def test_space_unicode_and_shell_metacharacters_are_literal_path_data(
+    tmp_path: Path,
+) -> None:
+    app = FixtureApp(tmp_path)
+    relative = "nested space\\π;$([literal])&file.aux"
+    proposal = app.proposal({relative: b"special"})
+
+    moved = app.quarantine().execute(
+        proposal, app.approve(proposal.items_digest, "quarantine")
+    )
+    recovery_id = str(app.database.recovery_items(app.project_id)[0]["id"])
+    restore = app.recovery_service().prepare_restore([recovery_id])
+    restored = app.recovery_service().restore(
+        restore, app.approve(restore.digest, "restore")
+    )
+
+    assert moved.status == "complete"
+    assert restored.status == "complete"
+    assert (app.root / relative).read_bytes() == b"special"
+
+
 def test_locked_file_is_skipped_and_partial_result_is_truthful(tmp_path: Path) -> None:
     app = FixtureApp(tmp_path)
     proposal = app.proposal({"a.aux": b"a", "b.aux": b"b"})
@@ -267,6 +288,36 @@ def test_restore_is_byte_exact_and_collision_requires_reviewed_alternative(
     assert occupied.read_bytes() == b"newer"
 
 
+def test_interrupted_restore_is_reconciled_without_repeating_the_move(
+    tmp_path: Path,
+) -> None:
+    app = FixtureApp(tmp_path)
+    proposal = app.proposal({"restore-crash.aux": b"restored after crash"})
+    app.quarantine().execute(
+        proposal, app.approve(proposal.items_digest, "quarantine")
+    )
+    recovery_id = str(app.database.recovery_items(app.project_id)[0]["id"])
+    plan = app.recovery_service().prepare_restore([recovery_id])
+
+    def crash(stage: str, _item: object) -> None:
+        if stage == "after-move":
+            raise InjectedInterruption(stage)
+
+    with pytest.raises(InjectedInterruption):
+        app.recovery_service().restore(
+            plan,
+            app.approve(plan.digest, "restore"),
+            failure_hook=crash,
+        )
+
+    destination = app.root / "restore-crash.aux"
+    assert destination.read_bytes() == b"restored after crash"
+    assert app.database.recovery_item(recovery_id)["state"] == "quarantined"
+    result = app.recovery_service().reconcile_interrupted()
+    assert result[0].outcome == "reconciled"
+    assert app.database.recovery_item(recovery_id)["state"] == "restored"
+
+
 def test_purge_requires_separate_approval_and_detects_altered_payload(tmp_path: Path) -> None:
     app = FixtureApp(tmp_path)
     proposal = app.proposal({"purge.aux": b"payload"})
@@ -337,4 +388,5 @@ def test_history_cli_reports_operation_and_recovery_state(
     payload = json.loads(capsys.readouterr().out)
     assert code == 0
     assert payload["operations"][0]["action"] == "quarantine"
+    assert payload["operations"][0]["items"][0]["outcome"] == "moved"
     assert payload["recovery_items"][0]["state"] == "quarantined"

@@ -141,6 +141,32 @@ def test_protected_or_unknown_item_cannot_enter_proposal(tmp_path: Path) -> None
     assert selected.exists()
 
 
+def test_active_task_blocks_even_unscoped_cleanup_proposal(tmp_path: Path) -> None:
+    root, recovery, database, service, project_id = project_setup(tmp_path)
+    target = root / "blocked.aux"
+    target.write_bytes(b"blocked")
+    with database.transaction(immediate=True) as connection:
+        connection.execute(
+            "INSERT INTO scans VALUES ('baseline', ?, ?, 'complete', 0, 0)",
+            (project_id, "2026-10-17T00:00:00+00:00"),
+        )
+        connection.execute(
+            """INSERT INTO tasks
+               VALUES ('active-task', ?, 'work', 'active', 'baseline', NULL, ?, NULL)""",
+            (project_id, "2026-10-17T00:00:00+00:00"),
+        )
+
+    with pytest.raises(ProposalError, match="active or interrupted"):
+        service.prepare(
+            project_id=project_id,
+            root=root,
+            recovery_root=recovery,
+            selected=[candidate("blocked.aux", 7)],
+        )
+
+    assert target.read_bytes() == b"blocked"
+
+
 def test_cli_propose_is_read_only_and_emits_reviewable_json(
     tmp_path: Path, capsys
 ) -> None:  # type: ignore[no-untyped-def]

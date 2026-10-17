@@ -13,15 +13,15 @@ Statuses are evidence-based: **pending**, **in progress**, **verified**, or **bl
 | R03 | M3 protection, pins, Git, explanations; M2 | `src/ai_cleaner/services/classify.py` | Protected never selectable; unknown remains unknown | Mixed valuables, pins, real Git/NUL and Git-failure tests: 4 passed | verified |
 | R04 | M4 task snapshots/declarations; M3 | `src/ai_cleaner/services/tasks.py` | Honest observed-during-task diff and active-task block | Snapshot/diff/scope/conflict/CLI journey: 4 passed | verified |
 | R05 | M5 immutable proposals and stale checks; M4 | `src/ai_cleaner/services/proposals.py` | Exact digest; changed state requires new review | Exact selection, same-size content/replacement, policy, CLI tests: 6 passed | verified |
-| R06 | M5/M9 ephemeral desktop approval; M4/M8 | `src/ai_cleaner/domain/approval.py`, `src/ai_cleaner/ui/` | Missing/cancelled/stale/replayed approval cannot mutate | Broker missing/forged/expiry/replay/digest tests passed; UI pending | in progress |
+| R06 | M5/M9 ephemeral desktop approval; M4/M8 | `src/ai_cleaner/domain/approval.py`, `src/ai_cleaner/ui/` | Missing/cancelled/stale/replayed approval cannot mutate | Broker boundary plus actual confirm/cancel/quarantine/restore/purge controls passed in 62-test gate | verified |
 | R07 | M6 same-volume quarantine; M5 | `src/ai_cleaner/services/operations.py` | Only approved unchanged files move; per-file outcomes | M5–M8 native regression gate: 27 passed; five interruption boundaries and lock conflict covered | verified |
 | R08 | M7 reconciliation and restore; M6 | `src/ai_cleaner/services/recovery.py` | Interrupted work reviewable; restore never overwrites | Restart reconciliation, byte-exact alternate restore, occupied destination tests passed | verified |
 | R09 | M8 separately approved purge; M7 | `src/ai_cleaner/services/purge.py` | No automatic or unapproved permanent deletion | Separate capability, altered payload, interruption and reminder-only retention tests passed | verified |
-| R10 | M7–M9 truthful history and totals | storage/services/UI | Individual outcomes; quarantined vs reclaimed bytes | History CLI and logical/quarantined/physical reporting tests passed; UI pending | in progress |
-| R11 | M0/M2/M9 local versioned bounded state | `pyproject.toml`, storage/config/UI | No accounts/network; schema/config versioned | Schema v2 fresh/repeat/newer/v1 migration tests passed; UI pending | in progress |
+| R10 | M7–M9 truthful history and totals | storage/services/UI | Individual outcomes; quarantined vs reclaimed bytes | CLI/UI per-file history and logical/quarantined/physical reporting passed | verified |
+| R11 | M0/M2/M9 local versioned bounded state | `pyproject.toml`, storage/config/UI | No accounts/network; schema/config versioned | Schema v2 migration and project/recovery selection UI passed; no network dependency | verified |
 | R12 | M4/M10 safe CLI and workflow docs | `src/ai_cleaner/cli.py`, `docs/` | Required read-only/metadata commands and exit codes | Scan/task/propose/history commands verified; final docs pending | in progress |
-| R13 | M9 responsive native Qt workflow | `src/ai_cleaner/ui/` | Complete connected Windows desktop journey | Pending M9 UI tests | pending |
-| R14 | Every milestone/M11 safety tests | `tests/` | Acceptance matrix on disposable fixtures | M1 native matrix 7 passed; later gates pending | in progress |
+| R13 | M9 responsive native Qt workflow | `src/ai_cleaner/ui/` | Complete connected Windows desktop journey | Offscreen actual-control loading/empty/cancel/error/task/quarantine/restore/purge tests passed | verified |
+| R14 | Every milestone/M11 safety tests | `tests/` | Acceptance matrix on disposable fixtures | Full suite 62 passed on Windows/NTFS; package smoke and final audit pending | in progress |
 | R15 | M0/M10/M11 reproducible setup/package | manifests/docs/packaging | Clean setup and standalone Windows onedir smoke | `uv.lock` resolved on Python 3.12.6; M11 package pending | in progress |
 | R16 | Every gate traceability/Git hygiene | this tracker, local commits | Plan mapped, changes reviewed, evidence current | Starting state recorded | in progress |
 
@@ -38,6 +38,6 @@ Statuses are evidence-based: **pending**, **in progress**, **verified**, or **bl
 | M6 | Quarantine | Ruff/mypy passed; M5–M8 native regression 27 passed, including every failure hook boundary | Windows 11 x64 / NTFS | None for M6 | verified |
 | M7 | Restore/history | Reconciliation, collision, alternate restore, integrity and history CLI passed in 27-test gate | Windows 11 x64 / NTFS | None for M7 | verified |
 | M8 | Purge | Separate approval, changed payload, interruption reconciliation and retention reminder passed | Windows 11 x64 / NTFS | Physical free-space is deliberately reported unknown, never inferred | verified |
-| M9 | Desktop | pytest-qt plus real fixture journey | Windows 11 x64 | Not implemented | pending |
+| M9 | Desktop | Ruff/mypy passed; full 62-test suite including 9 pytest-qt actual-control tests | Windows 11 x64 / NTFS / Qt offscreen | Visual DPI check continues in package smoke | verified |
 | M10 | Documentation | Follow commands in clean disposable environment | Windows 11 x64 | Not implemented | pending |
 | M11 | CI/package/audit | Full suite and packaged-app smoke | Windows 11 x64 | Not implemented | pending |

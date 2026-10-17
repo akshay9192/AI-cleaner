@@ -183,6 +183,7 @@ class QuarantineService:
                             source,
                             destination,
                             root=root,
+                            destination_root=recovery_root,
                             expected=expected,
                             expected_sha256=item.sha256,
                         )

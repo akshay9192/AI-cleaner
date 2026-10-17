@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import threading
 import uuid
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path, PurePath
@@ -39,12 +41,22 @@ class TaskService:
         self.filesystem = filesystem
         self.scanner = scanner
 
-    def start(self, root: Path, label: str, *, excluded_roots: tuple[Path, ...] = ()) -> str:
+    def start(
+        self,
+        root: Path,
+        label: str,
+        *,
+        excluded_roots: tuple[Path, ...] = (),
+        cancel: threading.Event | None = None,
+        progress: Callable[[int], None] | None = None,
+    ) -> str:
         if not label.strip():
             raise ValueError("task label cannot be empty")
         root = root.absolute()
         identity = self.filesystem.validate_project_root(root)
-        scan = self.scanner.scan(root, excluded_roots=excluded_roots)
+        scan = self.scanner.scan(
+            root, excluded_roots=excluded_roots, cancel=cancel, progress=progress
+        )
         if not scan.complete:
             raise RuntimeError("a complete baseline scan is required to start a task")
         now = utc_now()
@@ -54,6 +66,10 @@ class TaskService:
             volume_serial=identity.volume_serial,
             created_at=now,
         )
+        if self.database.unresolved_task(project_id) is not None:
+            raise TaskConflictError(
+                "one active task already exists, or an interrupted task must be resolved"
+            )
         self.database.save_scan(project_id, scan, now)
         task_id = str(uuid.uuid4())
         try:
@@ -95,13 +111,22 @@ class TaskService:
                 (str(uuid.uuid4()), task_id, normalized, role, source, utc_now()),
             )
 
-    def finish(self, task_id: str, *, excluded_roots: tuple[Path, ...] = ()) -> TaskDiff:
+    def finish(
+        self,
+        task_id: str,
+        *,
+        excluded_roots: tuple[Path, ...] = (),
+        cancel: threading.Event | None = None,
+        progress: Callable[[int], None] | None = None,
+    ) -> TaskDiff:
         task = self._require_task(task_id)
         if task["status"] not in {"active", "interrupted"}:
             raise TaskConflictError("task is already finished")
         project = self._project(str(task["project_id"]))
         root = Path(str(project["root"]))
-        scan = self.scanner.scan(root, excluded_roots=excluded_roots)
+        scan = self.scanner.scan(
+            root, excluded_roots=excluded_roots, cancel=cancel, progress=progress
+        )
         if not scan.complete:
             raise RuntimeError("a complete end scan is required to finish a task")
         now = utc_now()
