@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+build/
+dist/
+*.spec.tmp
+.ai-cleaner-test-artifacts/
+.ai-cleaner-state/
+*.db-shm
+*.db-wal
+_bmad/render/
