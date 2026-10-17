@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import cast
 
 from ai_cleaner.domain.models import ScanResult
+from ai_cleaner.domain.proposals import Proposal
 
 SCHEMA_VERSION = 1
 
@@ -305,3 +306,37 @@ class Database:
                 "SELECT * FROM observations WHERE scan_id = ?", (scan_id,)
             ).fetchall()
         return {str(row["relative_path"]).casefold(): row for row in rows}
+
+    def save_proposal(self, proposal: Proposal) -> None:
+        with self.transaction(immediate=True) as connection:
+            connection.execute(
+                "INSERT INTO proposals VALUES (?, ?, ?, ?, ?, 'reviewable', ?)",
+                (
+                    proposal.proposal_id,
+                    proposal.project_id,
+                    proposal.task_id,
+                    proposal.policy_digest,
+                    proposal.items_digest,
+                    proposal.created_at,
+                ),
+            )
+            connection.executemany(
+                """INSERT INTO proposal_items
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                [
+                    (
+                        proposal.proposal_id,
+                        item.relative_path,
+                        item.action,
+                        item.volume_serial,
+                        item.file_index,
+                        item.size,
+                        item.modified_100ns,
+                        item.attributes,
+                        item.sha256,
+                        item.explanation,
+                        item.recovery_path,
+                    )
+                    for item in proposal.items
+                ],
+            )

@@ -16,6 +16,8 @@ from ai_cleaner.platform.windows_fs import (
     UnsupportedFilesystemError,
     WindowsFilesystem,
 )
+from ai_cleaner.services.classify import classify_files, git_evidence
+from ai_cleaner.services.proposals import ProposalError, ProposalService
 from ai_cleaner.services.scan import DEFAULT_ENTRY_LIMIT, Scanner
 from ai_cleaner.services.tasks import TaskConflictError, TaskService
 from ai_cleaner.storage.config import StatePaths
@@ -67,6 +69,11 @@ def build_parser() -> argparse.ArgumentParser:
     task_finish = task_subparsers.add_parser("finish", help="capture the task end snapshot")
     task_finish.add_argument("--task", required=True)
     task_finish.add_argument("--state-dir", type=Path, help=argparse.SUPPRESS)
+    propose = subparsers.add_parser("propose", help="prepare a reviewable cleanup proposal")
+    propose.add_argument("--root", required=True, type=Path)
+    propose.add_argument("--task")
+    propose.add_argument("--json", action="store_true")
+    propose.add_argument("--state-dir", type=Path, help=argparse.SUPPRESS)
     gui = subparsers.add_parser("gui", help="open the desktop application")
     gui.add_argument("--root", type=Path)
     return parser
@@ -151,6 +158,83 @@ def _task(args: argparse.Namespace) -> int:
         return 1
 
 
+def _propose(args: argparse.Namespace) -> int:
+    try:
+        state = StatePaths.discover(args.state_dir)
+        state.ensure()
+        database = Database(state.database)
+        database.migrate()
+        filesystem = WindowsFilesystem()
+        identity = filesystem.validate_project_root(args.root, app_state=state.root)
+        now = datetime.now(UTC).isoformat()
+        project_id = database.ensure_project(
+            root=args.root.absolute(),
+            resolved_root=identity.final_path,
+            volume_serial=identity.volume_serial,
+            recovery_root=state.recovery,
+            created_at=now,
+        )
+        task_service = TaskService(database, filesystem, Scanner(filesystem))
+        protected_by_task: set[str] = set()
+        declarations: dict[str, str] = {}
+        if args.task:
+            task_service.require_finished(args.task)
+            task_diff = task_service.diff(args.task)
+            declarations = database.task_declarations(args.task)
+            scan = Scanner(filesystem).scan(
+                args.root, excluded_roots=(state.root, state.recovery)
+            )
+            added = {path.casefold() for path in task_diff.added}
+            protected_by_task = {
+                item.relative_path
+                for item in scan.observations
+                if item.relative_path.casefold() not in added
+            }
+        else:
+            scan = Scanner(filesystem).scan(
+                args.root, excluded_roots=(state.root, state.recovery)
+            )
+        if not scan.complete:
+            print("proposal requires a complete scan", file=sys.stderr)
+            return 4
+        classified = classify_files(
+            scan.observations,
+            git=git_evidence(args.root),
+            pins=database.protections(project_id),
+            declarations=declarations,
+            active_task_paths=protected_by_task,
+        )
+        selected = [item for item in classified if item.selectable]
+        proposal = ProposalService(database, filesystem).prepare(
+            project_id=project_id,
+            root=args.root,
+            recovery_root=state.recovery,
+            selected=selected,
+            task_id=args.task,
+        )
+        payload = proposal.to_dict()
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+        else:
+            print(
+                f"reviewable proposal {proposal.proposal_id}: {len(proposal.items)} items, "
+                f"{proposal.logical_bytes} logical bytes; no files moved"
+            )
+        return 0
+    except (ValueError, BoundaryError, ProposalError) as error:
+        print(str(error), file=sys.stderr)
+        return 2
+    except UnsupportedFilesystemError as error:
+        print(str(error), file=sys.stderr)
+        return 3
+    except TaskConflictError as error:
+        print(str(error), file=sys.stderr)
+        return 5
+    except OSError as error:
+        print(str(error), file=sys.stderr)
+        return 1
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "doctor":
@@ -159,6 +243,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _scan(args)
     if args.command == "task":
         return _task(args)
+    if args.command == "propose":
+        return _propose(args)
     if args.command == "gui":
         from ai_cleaner.ui.app import main as gui_main
 
