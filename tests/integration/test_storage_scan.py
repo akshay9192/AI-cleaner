@@ -45,6 +45,26 @@ def test_newer_database_is_rejected(tmp_path: Path) -> None:
         raise AssertionError("newer schema was accepted")
 
 
+def test_version_one_database_migrates_operation_project_link(tmp_path: Path) -> None:
+    path = tmp_path / "version-one.db"
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            """CREATE TABLE operation_runs (
+               id TEXT PRIMARY KEY, proposal_digest TEXT NOT NULL, action TEXT NOT NULL,
+               status TEXT NOT NULL, started_at TEXT NOT NULL, ended_at TEXT)"""
+        )
+        connection.execute("PRAGMA user_version = 1")
+
+    Database(path).migrate()
+
+    with sqlite3.connect(path) as connection:
+        columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(operation_runs)")
+        }
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+    assert "project_id" in columns
+
+
 def test_scan_is_read_only_and_excludes_protected_trees(tmp_path: Path) -> None:
     root = tmp_path / "selected root"
     root.mkdir()

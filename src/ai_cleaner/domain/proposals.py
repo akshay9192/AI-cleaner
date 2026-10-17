@@ -55,9 +55,21 @@ class Proposal:
         }
 
 
-def digest_items(policy_digest: str, items: tuple[ProposalItem, ...]) -> str:
+def digest_items(
+    policy_digest: str,
+    items: tuple[ProposalItem, ...],
+    *,
+    project_id: str,
+    task_id: str | None,
+    root: str,
+    recovery_root: str,
+) -> str:
     payload = {
         "policy_digest": policy_digest,
+        "project_id": project_id,
+        "task_id": task_id,
+        "root": root,
+        "recovery_root": recovery_root,
         "items": [
             item.to_dict()
             for item in sorted(items, key=lambda value: value.relative_path.casefold())

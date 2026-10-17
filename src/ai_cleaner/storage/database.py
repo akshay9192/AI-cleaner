@@ -10,7 +10,7 @@ from typing import cast
 from ai_cleaner.domain.models import ScanResult
 from ai_cleaner.domain.proposals import Proposal
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS projects (
@@ -104,6 +104,7 @@ CREATE TABLE IF NOT EXISTS proposal_items (
 );
 CREATE TABLE IF NOT EXISTS operation_runs (
     id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id),
     proposal_digest TEXT NOT NULL,
     action TEXT NOT NULL,
     status TEXT NOT NULL,
@@ -162,6 +163,9 @@ class Database:
                 )
             if version == 0:
                 connection.executescript(SCHEMA)
+                connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+            elif version == 1:
+                connection.execute("ALTER TABLE operation_runs ADD COLUMN project_id TEXT")
                 connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             elif version != SCHEMA_VERSION:
                 raise RuntimeError(f"no migration path from schema {version}")
@@ -233,7 +237,20 @@ class Database:
                 "SELECT id FROM projects WHERE root = ? COLLATE NOCASE", (str(root),)
             ).fetchone()
             if existing:
-                return str(existing["id"])
+                project_id = str(existing["id"])
+                if recovery_root is not None:
+                    connection.execute(
+                        """UPDATE projects SET resolved_root = ?, volume_serial = ?,
+                           recovery_root = ?, policy_version = ? WHERE id = ?""",
+                        (
+                            resolved_root,
+                            volume_serial,
+                            str(recovery_root),
+                            policy_version,
+                            project_id,
+                        ),
+                    )
+                return project_id
             project_id = str(uuid.uuid4())
             connection.execute(
                 "INSERT INTO projects VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -340,3 +357,193 @@ class Database:
                     for item in proposal.items
                 ],
             )
+
+    def create_operation_run(
+        self,
+        *,
+        run_id: str,
+        project_id: str,
+        proposal_digest: str,
+        action: str,
+        started_at: str,
+    ) -> None:
+        with self.transaction(immediate=True) as connection:
+            connection.execute(
+                """INSERT INTO operation_runs
+                   (id, project_id, proposal_digest, action, status, started_at, ended_at)
+                   VALUES (?, ?, ?, ?, 'running', ?, NULL)""",
+                (run_id, project_id, proposal_digest, action, started_at),
+            )
+
+    def set_run_status(self, run_id: str, status: str, ended_at: str | None) -> None:
+        with self.transaction(immediate=True) as connection:
+            connection.execute(
+                "UPDATE operation_runs SET status = ?, ended_at = ? WHERE id = ?",
+                (status, ended_at, run_id),
+            )
+
+    def create_operation_item(
+        self,
+        *,
+        item_id: str,
+        run_id: str,
+        source: str,
+        destination: str,
+        expected_volume: int,
+        expected_file: int,
+        expected_sha256: str,
+        intent_at: str,
+    ) -> None:
+        with self.transaction(immediate=True) as connection:
+            connection.execute(
+                """INSERT INTO operation_items
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', NULL, NULL)""",
+                (
+                    item_id,
+                    run_id,
+                    source,
+                    destination,
+                    expected_volume,
+                    expected_file,
+                    expected_sha256,
+                    intent_at,
+                ),
+            )
+
+    def set_operation_outcome(self, item_id: str, outcome: str, error: str | None) -> None:
+        with self.transaction(immediate=True) as connection:
+            connection.execute(
+                """UPDATE operation_items
+                   SET outcome = ?, error = ?, completed_at = ? WHERE id = ?""",
+                (outcome, error, utc_timestamp(), item_id),
+            )
+
+    def add_recovery_item(
+        self,
+        *,
+        recovery_id: str,
+        operation_item_id: str,
+        project_id: str,
+        original_path: str,
+        payload_path: str,
+        volume_serial: int,
+        file_index: int,
+        size: int,
+        sha256: str,
+        state: str = "quarantined",
+    ) -> None:
+        now = utc_timestamp()
+        with self.transaction(immediate=True) as connection:
+            connection.execute(
+                """INSERT OR IGNORE INTO recovery_items
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)""",
+                (
+                    recovery_id,
+                    operation_item_id,
+                    project_id,
+                    original_path,
+                    payload_path,
+                    volume_serial,
+                    file_index,
+                    size,
+                    sha256,
+                    now,
+                    state,
+                    now,
+                ),
+            )
+
+    def pending_operation_items(self) -> list[sqlite3.Row]:
+        with self.connect() as connection:
+            return list(
+                connection.execute(
+                    """SELECT oi.*, r.project_id, r.action, r.status AS run_status
+                       FROM operation_items oi JOIN operation_runs r ON r.id = oi.run_id
+                       WHERE oi.outcome = 'pending'"""
+                ).fetchall()
+            )
+
+    def recovery_item(self, recovery_id: str) -> sqlite3.Row | None:
+        with self.connect() as connection:
+            return cast(
+                sqlite3.Row | None,
+                connection.execute(
+                    "SELECT * FROM recovery_items WHERE id = ?", (recovery_id,)
+                ).fetchone(),
+            )
+
+    def recovery_by_operation(self, operation_item_id: str) -> sqlite3.Row | None:
+        with self.connect() as connection:
+            return cast(
+                sqlite3.Row | None,
+                connection.execute(
+                    "SELECT * FROM recovery_items WHERE operation_item_id = ?",
+                    (operation_item_id,),
+                ).fetchone(),
+            )
+
+    def recovery_by_payload(self, payload_path: str) -> sqlite3.Row | None:
+        with self.connect() as connection:
+            return cast(
+                sqlite3.Row | None,
+                connection.execute(
+                    "SELECT * FROM recovery_items WHERE payload_path = ? COLLATE NOCASE",
+                    (payload_path,),
+                ).fetchone(),
+            )
+
+    def project(self, project_id: str) -> sqlite3.Row | None:
+        with self.connect() as connection:
+            return cast(
+                sqlite3.Row | None,
+                connection.execute(
+                    "SELECT * FROM projects WHERE id = ?", (project_id,)
+                ).fetchone(),
+            )
+
+    def recovery_items(self, project_id: str | None = None) -> list[sqlite3.Row]:
+        with self.connect() as connection:
+            if project_id:
+                rows = connection.execute(
+                    """SELECT * FROM recovery_items WHERE project_id = ?
+                       ORDER BY quarantined_at DESC""",
+                    (project_id,),
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    "SELECT * FROM recovery_items ORDER BY quarantined_at DESC"
+                ).fetchall()
+        return list(rows)
+
+    def update_recovery_state(
+        self, recovery_id: str, state: str, *, restored_path: str | None = None
+    ) -> None:
+        with self.transaction(immediate=True) as connection:
+            connection.execute(
+                """UPDATE recovery_items
+                   SET state = ?, restored_path = ?, updated_at = ? WHERE id = ?""",
+                (state, restored_path, utc_timestamp(), recovery_id),
+            )
+
+    def history(self, project_id: str) -> list[dict[str, object]]:
+        with self.connect() as connection:
+            rows = connection.execute(
+                """SELECT r.id, r.action, r.status, r.started_at, r.ended_at,
+                          COUNT(i.id) AS item_count,
+                          SUM(CASE WHEN i.outcome IN ('moved', 'restored', 'purged', 'reconciled')
+                                   THEN 1 ELSE 0 END) AS success_count,
+                          SUM(CASE WHEN i.outcome IN ('failed', 'collision', 'unresolved')
+                                   THEN 1 ELSE 0 END) AS failure_count
+                   FROM operation_runs r
+                   LEFT JOIN operation_items i ON i.run_id = r.id
+                   WHERE r.project_id = ?
+                   GROUP BY r.id ORDER BY r.started_at DESC""",
+                (project_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+
+def utc_timestamp() -> str:
+    from datetime import UTC, datetime
+
+    return datetime.now(UTC).isoformat()

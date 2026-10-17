@@ -80,15 +80,24 @@ class ProposalService:
             )
         frozen = tuple(sorted(items, key=lambda item: item.relative_path.casefold()))
         policy = policy_digest(policy_version)
+        absolute_root = str(root.absolute())
+        absolute_recovery = str(recovery_root.absolute())
         proposal = Proposal(
             proposal_id=proposal_id,
             project_id=project_id,
             task_id=task_id,
-            root=str(root.absolute()),
-            recovery_root=str(recovery_root.absolute()),
+            root=absolute_root,
+            recovery_root=absolute_recovery,
             policy_digest=policy,
             items=frozen,
-            items_digest=digest_items(policy, frozen),
+            items_digest=digest_items(
+                policy,
+                frozen,
+                project_id=project_id,
+                task_id=task_id,
+                root=absolute_root,
+                recovery_root=absolute_recovery,
+            ),
             created_at=utc_now(),
         )
         self.database.save_proposal(proposal)
@@ -97,7 +106,14 @@ class ProposalService:
     def revalidate(self, proposal: Proposal, *, policy_version: str = POLICY_VERSION) -> None:
         if proposal.policy_digest != policy_digest(policy_version):
             raise FileChangedError("cleanup policy changed after review")
-        if proposal.items_digest != digest_items(proposal.policy_digest, proposal.items):
+        if proposal.items_digest != digest_items(
+            proposal.policy_digest,
+            proposal.items,
+            project_id=proposal.project_id,
+            task_id=proposal.task_id,
+            root=proposal.root,
+            recovery_root=proposal.recovery_root,
+        ):
             raise FileChangedError("proposal operations changed after review")
         root = Path(proposal.root)
         for item in proposal.items:

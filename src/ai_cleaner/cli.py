@@ -74,8 +74,13 @@ def build_parser() -> argparse.ArgumentParser:
     propose.add_argument("--task")
     propose.add_argument("--json", action="store_true")
     propose.add_argument("--state-dir", type=Path, help=argparse.SUPPRESS)
+    history = subparsers.add_parser("history", help="show cleanup and recovery history")
+    history.add_argument("--root", required=True, type=Path)
+    history.add_argument("--json", action="store_true")
+    history.add_argument("--state-dir", type=Path, help=argparse.SUPPRESS)
     gui = subparsers.add_parser("gui", help="open the desktop application")
     gui.add_argument("--root", type=Path)
+    gui.add_argument("--state-dir", type=Path, help=argparse.SUPPRESS)
     return parser
 
 
@@ -235,6 +240,37 @@ def _propose(args: argparse.Namespace) -> int:
         return 1
 
 
+def _history(args: argparse.Namespace) -> int:
+    try:
+        state = StatePaths.discover(args.state_dir)
+        database = Database(state.database)
+        database.migrate()
+        project = database.project_by_root(args.root)
+        if project is None:
+            print("the selected project has no AI-cleaner history", file=sys.stderr)
+            return 2
+        project_id = str(project["id"])
+        payload = {
+            "project_id": project_id,
+            "root": str(args.root.absolute()),
+            "operations": database.history(project_id),
+            "recovery_items": [
+                dict(item) for item in database.recovery_items(project_id)
+            ],
+        }
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+        else:
+            print(
+                f"{len(payload['operations'])} operations; "
+                f"{len(payload['recovery_items'])} recovery items"
+            )
+        return 0
+    except (ValueError, OSError) as error:
+        print(str(error), file=sys.stderr)
+        return 1
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "doctor":
@@ -245,8 +281,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _task(args)
     if args.command == "propose":
         return _propose(args)
+    if args.command == "history":
+        return _history(args)
     if args.command == "gui":
         from ai_cleaner.ui.app import main as gui_main
 
-        return gui_main()
+        return gui_main(root=args.root, state_override=args.state_dir)
     return 2
