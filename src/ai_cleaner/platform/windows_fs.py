@@ -327,6 +327,27 @@ class WindowsFilesystem:
             raise UnsupportedFilesystemError("cross-volume recovery is not supported")
         return ValidatedRoots(project, recovery, project_id.volume_serial)
 
+    def validate_project_root(
+        self, project: Path, *, app_state: Path | None = None
+    ) -> FileIdentity:
+        project = project.absolute()
+        if not project.is_dir():
+            raise BoundaryError("the project root must already exist")
+        if project == Path(project.anchor):
+            raise BoundaryError("drive roots cannot be selected as projects")
+        forbidden = [Path.home(), Path(os.environ.get("WINDIR", "C:/Windows"))]
+        for variable in ("ProgramFiles", "ProgramFiles(x86)"):
+            if os.environ.get(variable):
+                forbidden.append(Path(os.environ[variable]))
+        if any(_normal(project) == _normal(path) for path in forbidden):
+            raise BoundaryError("the selected project root is protected")
+        if app_state and (_is_within(project, app_state) or _is_within(app_state, project)):
+            raise BoundaryError("the project root overlaps AI-cleaner state")
+        if self._filesystem_name(project) != "NTFS":
+            raise UnsupportedFilesystemError("mutation requires a local NTFS project")
+        self._reject_reparse_chain(project)
+        return self.inspect(project)
+
     def _reject_reparse_chain(self, path: Path) -> None:
         current = path
         while current != current.parent:
