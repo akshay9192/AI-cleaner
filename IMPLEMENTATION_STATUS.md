@@ -8,7 +8,7 @@ Statuses are evidence-based: **pending**, **in progress**, **verified**, or **bl
 
 | Requirement | Plan task / dependencies | Code | Acceptance criterion | Verification evidence | Status |
 |---|---|---|---|---|---|
-| R01 | M1 root and filesystem boundary validation; M0 | `src/ai_cleaner/platform/` | Only supported, explicit project roots and same-volume recovery | Pending M1 tests | pending |
+| R01 | M1 root and filesystem boundary validation; M0 | `src/ai_cleaner/platform/windows_fs.py` | Only supported, explicit project roots and same-volume recovery | Native root/boundary/handle matrix: 7 passed | verified |
 | R02 | M2 bounded cancellable read-only inventory; M1 | `src/ai_cleaner/services/scan.py` | No inspected-file mutation; incomplete scans explicit | Pending M2 tests | pending |
 | R03 | M3 protection, pins, Git, explanations; M2 | `src/ai_cleaner/services/classify.py` | Protected never selectable; unknown remains unknown | Pending M3 tests | pending |
 | R04 | M4 task snapshots/declarations; M3 | `src/ai_cleaner/services/tasks.py` | Honest observed-during-task diff and active-task block | Pending M4 tests | pending |
@@ -21,7 +21,7 @@ Statuses are evidence-based: **pending**, **in progress**, **verified**, or **bl
 | R11 | M0/M2/M9 local versioned bounded state | `pyproject.toml`, storage/config/UI | No accounts/network; schema/config versioned | M0 lock/tooling verified; storage pending M2 | in progress |
 | R12 | M4/M10 safe CLI and workflow docs | `src/ai_cleaner/cli.py`, `docs/` | Required read-only/metadata commands and exit codes | Doctor/help exercised; required commands pending M2–M4 | in progress |
 | R13 | M9 responsive native Qt workflow | `src/ai_cleaner/ui/` | Complete connected Windows desktop journey | Pending M9 UI tests | pending |
-| R14 | Every milestone/M11 safety tests | `tests/` | Acceptance matrix on disposable fixtures | Pending | pending |
+| R14 | Every milestone/M11 safety tests | `tests/` | Acceptance matrix on disposable fixtures | M1 native matrix 7 passed; later gates pending | in progress |
 | R15 | M0/M10/M11 reproducible setup/package | manifests/docs/packaging | Clean setup and standalone Windows onedir smoke | `uv.lock` resolved on Python 3.12.6; M11 package pending | in progress |
 | R16 | Every gate traceability/Git hygiene | this tracker, local commits | Plan mapped, changes reviewed, evidence current | Starting state recorded | in progress |
 
@@ -30,7 +30,7 @@ Statuses are evidence-based: **pending**, **in progress**, **verified**, or **bl
 | Milestone | Scope | Check command / evidence | Platform | Remaining limitation | Status |
 |---|---|---|---|---|---|
 | M0 | Foundation | Frozen sync passed; doctor/help passed; Ruff passed; mypy passed; pytest 2 passed | Windows 11 x64 / Python 3.12.6 | None for M0 | verified |
-| M1 | Windows safety adapter | Native disposable-fixture matrix | Windows 11 x64 | Not implemented | pending |
+| M1 | Windows safety adapter | Ruff/mypy passed; `pytest tests/windows/test_windows_fs.py`: 7 passed | Windows 11 x64 / NTFS | Other acceptance cases continue in M6–M8 | verified |
 | M2 | Storage and scanner | Scanner/storage/CLI integration tests | Windows 11 x64 | Not implemented | pending |
 | M3 | Classification | Mixed-project and Git failure tests | Windows 11 x64 | Not implemented | pending |
 | M4 | Task lifecycle | Task diff and CLI tests | Windows 11 x64 | Not implemented | pending |
