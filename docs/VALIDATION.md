@@ -50,6 +50,37 @@ The current popup/script-focused runs in this managed session recorded:
 - Cancelling a cleanup review now prints the exact proposal review command. A regression test
   confirms that the proposal remains available and the candidate remains untouched.
 
+## User-performed external Windows validation
+
+On 18 October 2026, the owner reported these results from an ordinary external Windows session.
+They are user-performed evidence, not checks executed or independently observed by the finalizing
+agent:
+
+- the unmodified suite passed all 66 tests in 13.95 seconds using a fresh, unique pytest
+  `--basetemp` directory;
+- real popup quarantine and restore succeeded; protected baseline files and the deliverable
+  remained present, and the restored preview contained its expected text;
+- cancelling the popup retained the temporary file and its expected contents;
+- a separate human-approved purge succeeded for the synthetic 24-byte payload;
+- `doctor --json` returned status `ok`;
+- `uv lock` completed and `git diff -- uv.lock` showed no unstaged changes; and
+- after moving the broken `pip-24.2.dist-info` metadata aside, `uv sync --frozen --group dev`
+  succeeded and `uv pip check` checked 16 packages and reported all installed packages compatible.
+
+This evidence closes the current native suite, real popup journey, lock/frozen-sync, and package
+compatibility checks. It does not erase the historical failures below, verify BMAD, or cover the
+six implementation gaps found by the subsequent quick review.
+
+## Finalization quick-review boundary
+
+Inspection after the external run found six untested contract gaps: no supported project-specific
+same-volume recovery setup, incomplete hard-protection coverage for common source/configuration
+types, no Git-state reclassification immediately before mutation, a replaceable destination
+parent during the final move, different locks for quarantine versus restore/purge, and
+reconciliation methods that no startup or CLI path invokes. Passing checks remain valid for the
+paths they exercised, but the affected safety and final-audit gates remain in progress. Details are
+recorded in `IMPLEMENTATION_STATUS.md` and `_bmad-output/deferred-work.md`.
+
 The workflow orchestration tests patch only `_reject_reparse_chain` because this managed runner
 denies opening the user-profile ancestor. Actual disposable file hashing, guarded
 moves, journaling, recovery, and deletion still execute. This patch is test-only and is not exposed
@@ -80,10 +111,9 @@ product install, but generated lock data was not hand-edited again. `uv lock` an
 `uv sync --frozen` cannot run in this session, so clean regeneration and frozen validation remain
 blocked.
 
-The BMAD renderer previously failed through that boundary and, per its instructions, was not
-rerun. BMAD automation was unavailable; no BMAD review or verification is claimed. Standard plan
-review, bounded parallel audits, diff inspection, static analysis, and direct workspace-local
-verification were used instead.
+An earlier BMAD renderer attempt failed through that boundary and, per its instructions for that
+run, was not rerun. A later finalization workflow rendered successfully, but its delegated runner
+encountered the same access denial. No completed BMAD review or verification is claimed.
 
 ## Native fixture and human popup journey
 
@@ -93,8 +123,9 @@ state directories, baseline inputs, and repository-local agent instructions. No 
 is a cleanup target. The exact cancel/review/quarantine/restore journey and separate purge journey
 are in `docs/NATIVE_ACCEPTANCE.md`.
 
-The agent has not selected or approved any production popup. Native start, popup mutation,
-restore, and purge remain pending in an ordinary interactive PowerShell session.
+At the managed-session handoff, the agent had not selected or approved any production popup and
+those checks remained pending. The owner subsequently completed them as user-performed external
+validation, recorded above.
 
 ## Clean install and external-directory checks
 
@@ -111,7 +142,8 @@ upgraded. From the separate synthetic project directory:
 - installed `ai-cleaner start` reached the native safety adapter, then was blocked only by the
   managed runner's user-profile ancestor denial.
 
-Run these remaining checks in an ordinary PowerShell session without changing security settings:
+These were the remaining external checks at the managed-session handoff and remain useful
+reproduction commands:
 
 ```powershell
 Set-Location "C:\path\to\AI-cleaner"
@@ -121,9 +153,8 @@ git diff -- uv.lock
 uv sync --frozen --group dev
 ```
 
-Review the lock diff before committing it; the intended change is removal of unreachable records,
-not dependency upgrades. Do not rerun the failed BMAD renderer. Then follow
-`docs/NATIVE_ACCEPTANCE.md` for the human popup journey.
+The owner subsequently reported that the suite, stable-lock check, frozen dev sync, and human popup
+journey passed as recorded above. BMAD remains unverified.
 
 Never substitute a real Downloads, Documents, home, repository, or assignment directory for this
 fixture.

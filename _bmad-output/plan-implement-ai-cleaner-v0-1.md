@@ -3,14 +3,14 @@ title: 'Implement AI-cleaner v0.1'
 type: 'feature'
 ticket: ''
 created: '2026-10-17'
-status: 'in-progress'
+status: 'built'
 baseline_revision: '97f91e96231df24f006ba64b081a296b9e3e067a'
 route: 'full'
 route_source: 'auto'
 risk: 'high'
-review: ''
-review_source: ''
-lenses_ran: []
+review: 'quick'
+review_source: 'pinned'
+lenses_ran: [quick]
 review_loop_iteration: 0
 context:
   - '{project-root}/AI_CLEANER_PROJECT_PLAN.md'
@@ -90,3 +90,27 @@ Keep policy/proposals independent of Qt. Filesystem mutation is reachable only t
 
 **Manual checks:**
 - Launch the packaged app outside the checkout and complete select → scan → review → approve → quarantine → restore, then separately review and approve purge on disposable fixtures.
+
+**Current external evidence (owner-performed, 18 October 2026):**
+- The unmodified Windows suite passed all 66 tests in 13.95 seconds with a fresh unique pytest
+  `--basetemp`; the real popup cancellation, quarantine, restore, and separately approved purge
+  journeys passed on synthetic fixtures.
+- Protected baseline files and the deliverable remained present, the restored preview retained its
+  expected text, cancellation retained its file and contents, and purge removed the synthetic
+  24-byte payload.
+- `doctor --json` reported `ok`; `uv lock` left no unstaged `uv.lock` diff; after the damaged pip
+  metadata was isolated, `uv sync --frozen --group dev` succeeded and `uv pip check` found all 16
+  installed packages compatible.
+- These are user-reported external results, not checks run by the finalizing agent. Historical
+  managed-session failures remain recorded in `../docs/VALIDATION.md`. BMAD remains unverified.
+
+## Review Triage Log
+
+| Verdict | Location | Evidence and route |
+|---|---|---|
+| medium | `../src/ai_cleaner/storage/config.py:16`, `../src/ai_cleaner/cli.py:180` | Recovery always follows the global state root; the hidden state override is not the required project-level setup. Pre-existing finalization gap; deferred. |
+| high | `../src/ai_cleaner/services/classify.py:12` | Common source/configuration examples such as `.ps1`, `.cfg`, `.npmrc`, YAML, HTML, and CSS miss every hard-protection set and can become selectable after registration. Pre-existing finalization gap; deferred. |
+| high | `../src/ai_cleaner/services/proposals.py:113` | Revalidation checks policy digest, pins, identity, and hash but never refreshes Git evidence, so a newly tracked proposal item can still move. Pre-existing finalization gap; deferred. |
+| high | `../src/ai_cleaner/platform/windows_fs.py:499` | The actual destination parent uses default delete sharing; locking its parent does not prevent replacement of the validated destination directory. Pre-existing finalization gap; deferred. |
+| high | `../src/ai_cleaner/cli.py:469` | Quarantine locks by project ID while restore and purge use `recovery.lock`, permitting conflicting operations on the same project/recovery state. Pre-existing finalization gap; deferred. |
+| high | `../src/ai_cleaner/services/recovery.py:49`, `../src/ai_cleaner/services/purge.py:165` | Reconciliation methods exist but no startup or CLI path calls them, leaving post-crash intents and payloads unresolved through the product. Pre-existing finalization gap; deferred. |
