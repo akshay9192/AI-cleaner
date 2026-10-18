@@ -69,7 +69,7 @@ class FixtureApp:
         )
 
     def approve(self, digest: str, action: str):
-        return self.approvals._grant_from_ui(
+        return self.approvals._grant_after_human_review(
             proposal_digest=digest, reviewed_digest=digest, action=action
         )
 
@@ -95,11 +95,10 @@ def test_no_approval_and_changed_file_leave_user_file_unchanged(tmp_path: Path) 
     assert (app.root / "cache.aux").read_bytes() == b"AAAA"
 
     (app.root / "cache.aux").write_bytes(b"BBBB")
-    result = app.quarantine().execute(
-        proposal, app.approve(proposal.items_digest, "quarantine")
-    )
-    assert result.status == "partial"
-    assert result.outcomes[0].outcome == "failed"
+    with pytest.raises(RuntimeError, match="changed after review"):
+        app.quarantine().execute(
+            proposal, app.approve(proposal.items_digest, "quarantine")
+        )
     assert (app.root / "cache.aux").read_bytes() == b"BBBB"
 
 
@@ -161,14 +160,13 @@ def test_locked_file_is_skipped_and_partial_result_is_truthful(tmp_path: Path) -
     app = FixtureApp(tmp_path)
     proposal = app.proposal({"a.aux": b"a", "b.aux": b"b"})
     locked = app.root / "b.aux"
-    with app.filesystem.open_exclusive_file(locked):
-        result = app.quarantine().execute(
+    with app.filesystem.open_exclusive_file(locked), pytest.raises(OSError):
+        app.quarantine().execute(
             proposal, app.approve(proposal.items_digest, "quarantine")
         )
-    assert [item.outcome for item in result.outcomes] == ["moved", "failed"]
-    assert not (app.root / "a.aux").exists()
+    assert (app.root / "a.aux").read_bytes() == b"a"
     assert locked.read_bytes() == b"b"
-    assert len(app.database.recovery_items(app.project_id)) == 1
+    assert app.database.recovery_items(app.project_id) == []
 
 
 def test_cancellation_stops_subsequent_items_but_preserves_completed_record(
@@ -331,10 +329,8 @@ def test_purge_requires_separate_approval_and_detects_altered_payload(tmp_path: 
         app.purge_service().execute(plan, {"approved": True})
     payload = Path(str(recovery["payload_path"]))
     payload.write_bytes(b"altered")
-    result = app.purge_service().execute(plan, app.approve(plan.digest, "purge"))
-    assert result.status == "partial"
-    assert result.logical_bytes_removed == 0
-    assert result.reclaimed_bytes is None
+    with pytest.raises(RuntimeError, match="content changed after review"):
+        app.purge_service().execute(plan, app.approve(plan.digest, "purge"))
     assert payload.read_bytes() == b"altered"
 
 

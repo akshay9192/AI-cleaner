@@ -177,7 +177,7 @@ class RecoveryService:
         *,
         failure_hook: RestoreFailureHook | None = None,
     ) -> OperationResult:
-        self.approvals.consume(approval, proposal_digest=plan.digest, action="restore")
+        plan.validate()
         run_id = str(uuid.uuid4())
         outcomes: list[ItemOutcome] = []
         project = self.database.project(plan.project_id)
@@ -186,6 +186,8 @@ class RecoveryService:
         recovery_root = Path(str(project["recovery_root"]))
         project_root = Path(str(project["root"]))
         with OperationLock(self.filesystem, self.lock_path):
+            self._preflight_restore(plan, recovery_root, project_root)
+            self.approvals.consume(approval, proposal_digest=plan.digest, action="restore")
             self.database.create_operation_run(
                 run_id=run_id,
                 project_id=plan.project_id,
@@ -261,6 +263,36 @@ class RecoveryService:
             0,
             None,
         )
+
+    def _preflight_restore(
+        self, plan: RecoveryActionPlan, recovery_root: Path, project_root: Path
+    ) -> None:
+        for item in plan.items:
+            row = self.database.recovery_item(item.recovery_id)
+            if (
+                row is None
+                or row["state"] != "quarantined"
+                or str(row["payload_path"]) != item.source
+                or int(row["volume_serial"]) != item.volume_serial
+                or int(row["file_index"]) != item.file_index
+                or int(row["size"]) != item.size
+                or str(row["sha256"]) != item.sha256
+            ):
+                raise RecoveryError("recovery item changed after review")
+            destination = Path(item.destination)
+            if destination.exists():
+                raise FileExistsError(f"restore destination is occupied: {destination}")
+            self.filesystem.validate_destination(
+                destination, project_root, expected_volume=item.volume_serial
+            )
+            observed = self.filesystem.validate_candidate(Path(item.source), recovery_root)
+            if (
+                observed.volume_serial != item.volume_serial
+                or observed.file_index != item.file_index
+                or observed.size != item.size
+                or self._hash(Path(item.source)) != item.sha256
+            ):
+                raise RecoveryError("recovery payload changed after review")
 
     def _hash(self, path: Path) -> str:
         with self.filesystem.open_exclusive_file(path) as handle:

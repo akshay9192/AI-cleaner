@@ -108,9 +108,6 @@ class QuarantineService:
         cancel: threading.Event | None = None,
         failure_hook: FailureHook | None = None,
     ) -> OperationResult:
-        self.approvals.consume(
-            approval, proposal_digest=proposal.items_digest, action="quarantine"
-        )
         if proposal.policy_digest != policy_digest():
             raise RuntimeError("cleanup policy changed after review")
         if proposal.items_digest != digest_items(
@@ -147,6 +144,20 @@ class QuarantineService:
         run_id = str(uuid.uuid4())
         outcomes: list[ItemOutcome] = []
         with OperationLock(self.filesystem, self.lock_path):
+            stored = self.database.proposal(proposal.proposal_id)
+            if (
+                stored is None
+                or stored.items_digest != proposal.items_digest
+                or self.database.proposal_state(proposal.proposal_id) != "reviewable"
+            ):
+                raise RuntimeError("proposal is missing, changed, or no longer reviewable")
+            ProposalService(self.database, self.filesystem).revalidate(proposal)
+            self.approvals.consume(
+                approval, proposal_digest=proposal.items_digest, action="quarantine"
+            )
+            self.database.set_proposal_state(
+                proposal.proposal_id, "executing", expected=("reviewable",)
+            )
             self.database.create_operation_run(
                 run_id=run_id,
                 project_id=proposal.project_id,
@@ -210,6 +221,7 @@ class QuarantineService:
                         outcomes.append(ItemOutcome(item.relative_path, "failed", str(error), 0))
             except InjectedInterruption:
                 self.database.set_run_status(run_id, "interrupted", utc_now())
+                self.database.set_proposal_state(proposal.proposal_id, "interrupted")
                 raise
             successes = sum(outcome.outcome == "moved" for outcome in outcomes)
             failures = sum(outcome.outcome == "failed" for outcome in outcomes)
@@ -218,6 +230,7 @@ class QuarantineService:
             if failures or cancelled:
                 status = "partial"
             self.database.set_run_status(run_id, status, utc_now())
+            self.database.set_proposal_state(proposal.proposal_id, status)
         return OperationResult(
             run_id,
             status,

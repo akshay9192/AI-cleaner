@@ -133,6 +133,49 @@ class ProposalService:
                         f"file content changed after review: {item.relative_path}"
                     )
 
+    def select_subset(self, proposal: Proposal, relative_paths: set[str]) -> Proposal:
+        wanted = {path.casefold() for path in relative_paths}
+        available = {item.relative_path.casefold() for item in proposal.items}
+        if not wanted:
+            raise ProposalError("select at least one eligible item")
+        if not wanted <= available:
+            raise ProposalError("selection contains an item outside the pending proposal")
+        selected = tuple(
+            item for item in proposal.items if item.relative_path.casefold() in wanted
+        )
+        if len(selected) == len(proposal.items):
+            self.revalidate(proposal)
+            return proposal
+        digest = digest_items(
+            proposal.policy_digest,
+            selected,
+            project_id=proposal.project_id,
+            task_id=proposal.task_id,
+            root=proposal.root,
+            recovery_root=proposal.recovery_root,
+        )
+        existing = self.database.proposal_by_digest(digest)
+        if existing is not None:
+            if self.database.proposal_state(existing.proposal_id) != "reviewable":
+                raise ProposalError("the exact selection was already used; review it again")
+            self.revalidate(existing)
+            return existing
+        subset = Proposal(
+            proposal_id=str(uuid.uuid4()),
+            project_id=proposal.project_id,
+            task_id=proposal.task_id,
+            root=proposal.root,
+            recovery_root=proposal.recovery_root,
+            policy_digest=proposal.policy_digest,
+            items=selected,
+            items_digest=digest,
+            created_at=utc_now(),
+        )
+        self.revalidate(subset)
+        self.database.save_proposal(subset)
+        self.database.set_proposal_state(proposal.proposal_id, "superseded")
+        return subset
+
     @staticmethod
     def identity(item: ProposalItem, final_path: str) -> FileIdentity:
         return FileIdentity(

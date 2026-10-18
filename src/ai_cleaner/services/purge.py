@@ -64,7 +64,7 @@ class PurgeService:
         *,
         failure_stage: str | None = None,
     ) -> OperationResult:
-        self.approvals.consume(approval, proposal_digest=plan.digest, action="purge")
+        plan.validate()
         project = self.database.project(plan.project_id)
         if project is None or not project["recovery_root"]:
             raise RuntimeError("project recovery metadata is missing")
@@ -72,6 +72,8 @@ class PurgeService:
         run_id = str(uuid.uuid4())
         outcomes: list[ItemOutcome] = []
         with OperationLock(self.filesystem, self.lock_path):
+            self._preflight(plan, recovery_root)
+            self.approvals.consume(approval, proposal_digest=plan.digest, action="purge")
             self.database.create_operation_run(
                 run_id=run_id,
                 project_id=plan.project_id,
@@ -133,6 +135,31 @@ class PurgeService:
             sum(row.logical_bytes for row in outcomes),
             None,
         )
+
+    def _preflight(self, plan: RecoveryActionPlan, recovery_root: Path) -> None:
+        for item in plan.items:
+            row = self.database.recovery_item(item.recovery_id)
+            if (
+                row is None
+                or row["state"] != "quarantined"
+                or str(row["payload_path"]) != item.source
+                or int(row["volume_serial"]) != item.volume_serial
+                or int(row["file_index"]) != item.file_index
+                or int(row["size"]) != item.size
+                or str(row["sha256"]) != item.sha256
+            ):
+                raise RuntimeError("recovery item changed after review")
+            path = Path(item.source)
+            observed = self.filesystem.validate_candidate(path, recovery_root)
+            if (
+                observed.volume_serial != item.volume_serial
+                or observed.file_index != item.file_index
+                or observed.size != item.size
+            ):
+                raise RuntimeError("recovery payload identity changed after review")
+            with self.filesystem.open_exclusive_file(path) as handle:
+                if self.filesystem.hash_handle(handle) != item.sha256:
+                    raise RuntimeError("recovery payload content changed after review")
 
     def reconcile_interrupted(self) -> int:
         reconciled = 0

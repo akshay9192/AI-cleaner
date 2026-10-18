@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import cast
 
 from ai_cleaner.domain.models import ScanResult
-from ai_cleaner.domain.proposals import Proposal
+from ai_cleaner.domain.proposals import Proposal, ProposalItem
 
 SCHEMA_VERSION = 2
 
@@ -321,6 +321,17 @@ class Database:
                 ).fetchone(),
             )
 
+    def unresolved_tasks(self, project_id: str) -> list[sqlite3.Row]:
+        with self.connect() as connection:
+            return list(
+                connection.execute(
+                    """SELECT * FROM tasks WHERE project_id = ?
+                       AND status IN ('active', 'interrupted')
+                       ORDER BY started_at""",
+                    (project_id,),
+                ).fetchall()
+            )
+
     def task_declarations(self, task_id: str) -> dict[str, str]:
         with self.connect() as connection:
             rows = connection.execute(
@@ -369,6 +380,80 @@ class Database:
                     for item in proposal.items
                 ],
             )
+
+    def proposal(self, proposal_id: str) -> Proposal | None:
+        with self.connect() as connection:
+            row = connection.execute(
+                """SELECT p.*, pr.root, pr.recovery_root
+                   FROM proposals p JOIN projects pr ON pr.id = p.project_id
+                   WHERE p.id = ?""",
+                (proposal_id,),
+            ).fetchone()
+            if row is None or not row["recovery_root"]:
+                return None
+            items = tuple(
+                ProposalItem(
+                    relative_path=str(item["relative_path"]),
+                    action=str(item["action"]),
+                    volume_serial=int(item["volume_serial"]),
+                    file_index=int(item["file_index"]),
+                    size=int(item["size"]),
+                    modified_100ns=int(item["modified_100ns"]),
+                    attributes=int(item["attributes"]),
+                    sha256=str(item["sha256"]),
+                    explanation=str(item["explanation"]),
+                    recovery_path=str(item["recovery_path"]),
+                )
+                for item in connection.execute(
+                    """SELECT * FROM proposal_items WHERE proposal_id = ?
+                       ORDER BY relative_path COLLATE NOCASE""",
+                    (proposal_id,),
+                ).fetchall()
+            )
+        return Proposal(
+            proposal_id=str(row["id"]),
+            project_id=str(row["project_id"]),
+            task_id=str(row["task_id"]) if row["task_id"] is not None else None,
+            root=str(row["root"]),
+            recovery_root=str(row["recovery_root"]),
+            policy_digest=str(row["policy_digest"]),
+            items=items,
+            items_digest=str(row["items_digest"]),
+            created_at=str(row["created_at"]),
+        )
+
+    def proposal_by_digest(self, items_digest: str) -> Proposal | None:
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT id FROM proposals WHERE items_digest = ?", (items_digest,)
+            ).fetchone()
+        return self.proposal(str(row["id"])) if row is not None else None
+
+    def proposal_state(self, proposal_id: str) -> str | None:
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT state FROM proposals WHERE id = ?", (proposal_id,)
+            ).fetchone()
+        return str(row["state"]) if row is not None else None
+
+    def set_proposal_state(
+        self, proposal_id: str, state: str, *, expected: tuple[str, ...] | None = None
+    ) -> None:
+        with self.transaction(immediate=True) as connection:
+            if expected:
+                placeholders = ", ".join("?" for _ in expected)
+                cursor = connection.execute(
+                    f"UPDATE proposals SET state = ? WHERE id = ? AND state IN ({placeholders})",
+                    (state, proposal_id, *expected),
+                )
+                if cursor.rowcount != 1:
+                    raise RuntimeError("proposal is no longer reviewable")
+            else:
+                cursor = connection.execute(
+                    "UPDATE proposals SET state = ? WHERE id = ?", (state, proposal_id)
+                )
+                if cursor.rowcount != 1:
+                    raise ValueError(f"unknown proposal: {proposal_id}")
 
     def create_operation_run(
         self,
@@ -526,6 +611,19 @@ class Database:
                     "SELECT * FROM recovery_items ORDER BY quarantined_at DESC"
                 ).fetchall()
         return list(rows)
+
+    def recovery_items_for_run(self, run_id: str) -> list[sqlite3.Row]:
+        with self.connect() as connection:
+            return list(
+                connection.execute(
+                    """SELECT ri.* FROM recovery_items ri
+                       JOIN operation_items oi ON oi.id = ri.operation_item_id
+                       JOIN operation_runs r ON r.id = oi.run_id
+                       WHERE r.id = ? AND r.action = 'quarantine'
+                       ORDER BY oi.intent_at""",
+                    (run_id,),
+                ).fetchall()
+            )
 
     def update_recovery_state(
         self, recovery_id: str, state: str, *, restored_path: str | None = None

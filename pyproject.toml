@@ -10,21 +10,16 @@ readme = "README.md"
 requires-python = ">=3.12,<3.13"
 license = { file = "LICENSE" }
 authors = [{ name = "Akshay Harwalkar" }]
-dependencies = [
-  "PySide6>=6.8,<6.12",
-]
+dependencies = []
 
 [project.scripts]
 ai-cleaner = "ai_cleaner.cli:main"
-ai-cleaner-gui = "ai_cleaner.ui.app:main"
 
 [dependency-groups]
 dev = [
   "mypy>=1.13",
-  "pyinstaller>=6.11",
   "pytest>=8.3",
   "pytest-cov>=6.0",
-  "pytest-qt>=4.4",
   "ruff>=0.8",
 ]
 
@@ -36,7 +31,7 @@ addopts = "-ra --strict-markers --strict-config"
 testpaths = ["tests"]
 markers = [
   "windows: requires native Windows filesystem semantics",
-  "ui: exercises the Qt interface",
+  "terminal: exercises terminal workflow orchestration",
 ]
 
 [tool.ruff]

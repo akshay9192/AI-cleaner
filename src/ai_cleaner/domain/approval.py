@@ -23,14 +23,14 @@ class _ApprovalCapability:
 
 
 class ApprovalBroker:
-    """Owns ephemeral capabilities; only a GUI confirmation handler calls the grant hook."""
+    """Owns ephemeral capabilities issued only after an interactive human review."""
 
     def __init__(self, *, lifetime_seconds: int = 600) -> None:
         self._secret = object()
         self._lifetime_seconds = lifetime_seconds
         self._unused: set[str] = set()
 
-    def _grant_from_ui(
+    def _grant_after_human_review(
         self,
         *,
         proposal_digest: str,

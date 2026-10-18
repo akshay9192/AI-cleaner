@@ -51,3 +51,14 @@ class RecoveryActionPlan:
             "digest": self.digest,
             "logical_bytes": self.logical_bytes,
         }
+
+    def recomputed_digest(self) -> str:
+        return self.create(self.project_id, self.action, self.items).digest
+
+    def validate(self) -> None:
+        if self.action not in {"restore", "purge"}:
+            raise ValueError("unsupported recovery action")
+        if not self.items:
+            raise ValueError("recovery action plan is empty")
+        if self.digest != self.recomputed_digest():
+            raise ValueError("recovery action plan changed after review")

@@ -1,0 +1,34 @@
+name: Windows terminal validation
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-package:
+    runs-on: windows-2022
+    env:
+      AI_CLEANER_STATE_DIR: ${{ github.workspace }}\.ai-cleaner-ci-state
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Install locked dependencies
+        run: uv sync --frozen --all-groups
+      - name: Lint
+        run: uv run ruff check .
+      - name: Type check
+        run: uv run mypy src
+      - name: Test
+        run: uv run pytest
+      - name: Smoke test terminal entry points
+        run: |
+          uv run ai-cleaner --help
+          uv run python scripts/project_cleanup.py --help
