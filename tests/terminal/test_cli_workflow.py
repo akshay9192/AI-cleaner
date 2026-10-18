@@ -42,22 +42,52 @@ class ScriptedReview:
 
 @pytest.fixture(autouse=True)
 def permit_managed_fixture_ancestors(monkeypatch: pytest.MonkeyPatch) -> None:
-    # The managed runner denies opening C:\Users\aksha itself. Native ancestor-chain behavior
+    # The managed runner denies opening the user-profile ancestor. Native ancestor-chain behavior
     # remains covered by the Windows suite; terminal orchestration uses disposable descendants.
     monkeypatch.setattr(
         "ai_cleaner.platform.windows_fs.WindowsFilesystem._reject_reparse_chain",
         lambda self, path: None,
     )
+    monkeypatch.setattr("ai_cleaner.popup.PopupInteraction._probe", lambda self: False)
 
 
 def _proposal_id(output: str) -> str:
-    match = re.search(r"ai-cleaner review --proposal ([0-9a-f-]+)", output)
+    match = re.search(r"ai_cleaner\.py review --proposal ([0-9a-f-]+)", output)
     assert match is not None
     return match.group(1)
 
 
 def _json_line(output: str) -> dict[str, object]:
     return json.loads(next(line for line in output.splitlines() if line.startswith("{")))
+
+
+def _tracked_proposal(
+    root: Path, state: Path, paths: dict[str, bytes], capsys: pytest.CaptureFixture[str]
+) -> tuple[str, str]:
+    root.mkdir()
+    assert (
+        main(["start", "--root", str(root), "--label", "fixture", "--state-dir", str(state)])
+        == 0
+    )
+    task_id = str(_json_line(capsys.readouterr().out)["task_id"])
+    for relative, content in paths.items():
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+        assert main(
+            [
+                "register-temp",
+                "--task",
+                task_id,
+                "--path",
+                relative,
+                "--state-dir",
+                str(state),
+            ]
+        ) == 0
+        capsys.readouterr()
+    assert main(["complete", "--task", task_id, "--state-dir", str(state)]) == 6
+    return task_id, _proposal_id(capsys.readouterr().out)
 
 
 def test_start_protect_complete_noninteractive_then_review_and_restore(
@@ -78,8 +108,6 @@ def test_start_protect_complete_noninteractive_then_review_and_restore(
     assert main(
         [
             "protect",
-            "--root",
-            str(root),
             "--task",
             task_id,
             "--path",
@@ -89,20 +117,25 @@ def test_start_protect_complete_noninteractive_then_review_and_restore(
         ]
     ) == 0
     capsys.readouterr()
-    assert main(
-        [
-            "register", "--root", str(root), "--task", task_id,
-            "--path", "scratch.aux", "--role", "scratch", "--state-dir", str(state),
-        ]
-    ) == 0
-    capsys.readouterr()
     (root / "final.zip").write_bytes(b"deliverable")
     scratch = root / "scratch.aux"
     scratch.write_bytes(b"intermediate")
+    assert main(
+        [
+            "register-temp",
+            "--task",
+            task_id,
+            "--path",
+            "scratch.aux",
+            "--state-dir",
+            str(state),
+        ]
+    ) == 0
+    capsys.readouterr()
     (root / "existing.txt").write_text("updated input", encoding="utf-8")
     missing.unlink()
 
-    code = main(["complete", "--root", str(root), "--state-dir", str(state)])
+    code = main(["complete", "--task", task_id, "--state-dir", str(state)])
     pending_output = capsys.readouterr().out
     assert code == EXIT_REVIEW_REQUIRED
     assert scratch.exists()
@@ -122,6 +155,16 @@ def test_start_protect_complete_noninteractive_then_review_and_restore(
     assert (root / "final.zip").read_bytes() == b"deliverable"
     assert result["quarantined_bytes"] == len(b"intermediate")
     assert result["reclaimed_bytes"] is None
+    database = Database(state / "state.db")
+    with database.connect() as connection:
+        run_row = connection.execute(
+            "SELECT proposal_id, task_id, approved_at FROM operation_runs WHERE id = ?",
+            (run_id,),
+        ).fetchone()
+    assert run_row is not None
+    assert run_row["proposal_id"] == proposal_id
+    assert run_row["task_id"] == task_id
+    assert run_row["approved_at"]
 
     assert run(
         ["restore", "--run", run_id, "--state-dir", str(state)],
@@ -136,18 +179,24 @@ def test_default_keep_cancel_protect_and_noninteractive_review_are_safe(
 ) -> None:
     root = tmp_path / "project"
     state = tmp_path / "state"
-    cache = root / "__pycache__"
-    cache.mkdir(parents=True)
-    candidate = cache / "module.pyc"
-    candidate.write_bytes(b"cache")
-
-    assert main(["propose", "--root", str(root), "--state-dir", str(state), "--json"]) == 6
-    proposal_id = _proposal_id(capsys.readouterr().out)
+    candidate = root / "preview.tmp"
+    _task_id, proposal_id = _tracked_proposal(
+        root, state, {"preview.tmp": b"cache"}, capsys
+    )
     assert main(["review", "--proposal", proposal_id, "--state-dir", str(state)]) == 6
     assert candidate.exists()
     capsys.readouterr()
 
-    decision = CleanupDecision(frozenset(), frozenset({"__pycache__\\module.pyc"}))
+    assert run(
+        ["review", "--proposal", proposal_id, "--state-dir", str(state)],
+        interaction=ScriptedReview(
+            cleanup=CleanupDecision(frozenset(), frozenset(), cancelled=True)
+        ),
+    ) == EXIT_CANCELLED
+    assert candidate.exists()
+    capsys.readouterr()
+
+    decision = CleanupDecision(frozenset(), frozenset({"preview.tmp"}))
     assert run(
         ["review", "--proposal", proposal_id, "--state-dir", str(state)],
         interaction=ScriptedReview(cleanup=decision),
@@ -156,7 +205,71 @@ def test_default_keep_cancel_protect_and_noninteractive_review_are_safe(
     database = Database(state / "state.db")
     project = database.project_by_root(root)
     assert project is not None
-    assert "__pycache__\\module.pyc".casefold() in database.protections(str(project["id"]))
+    assert "preview.tmp".casefold() in database.protections(str(project["id"]))
+
+
+def test_modified_registered_and_unregistered_files_are_retained(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = tmp_path / "project"
+    state = tmp_path / "state"
+    root.mkdir()
+    assert (
+        main(["start", "--root", str(root), "--label", "fixture", "--state-dir", str(state)])
+        == 0
+    )
+    task_id = str(_json_line(capsys.readouterr().out)["task_id"])
+    registered = root / "preview.tmp"
+    registered.write_bytes(b"registered")
+    assert main(
+        [
+            "register-temp",
+            "--task",
+            task_id,
+            "--path",
+            "preview.tmp",
+            "--state-dir",
+            str(state),
+        ]
+    ) == 0
+    capsys.readouterr()
+    registered.write_bytes(b"modified")
+    unregistered = root / "other.tmp"
+    unregistered.write_bytes(b"unknown")
+
+    assert main(["complete", "--task", task_id, "--state-dir", str(state)]) == 0
+    output = capsys.readouterr().out
+    assert "re-register before cleanup" in output
+    assert "Not explicitly registered" in output
+    assert registered.read_bytes() == b"modified"
+    assert unregistered.read_bytes() == b"unknown"
+
+
+def test_registered_temp_can_be_protected_before_completion(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = tmp_path / "project"
+    state = tmp_path / "state"
+    root.mkdir()
+    assert (
+        main(["start", "--root", str(root), "--label", "fixture", "--state-dir", str(state)])
+        == 0
+    )
+    task_id = str(_json_line(capsys.readouterr().out)["task_id"])
+    output = root / "output.tmp"
+    output.write_bytes(b"keep")
+    assert main(
+        ["register-temp", "--task", task_id, "--path", "output.tmp", "--state-dir", str(state)]
+    ) == 0
+    capsys.readouterr()
+    assert main(
+        ["protect", "--task", task_id, "--path", "output.tmp", "--state-dir", str(state)]
+    ) == 0
+    capsys.readouterr()
+
+    assert main(["complete", "--task", task_id, "--state-dir", str(state)]) == 0
+    assert output.read_bytes() == b"keep"
+    assert "Pinned by the user" in capsys.readouterr().out
 
 
 def test_complete_without_tracking_uses_conservative_existing_clutter_preview(
@@ -169,10 +282,10 @@ def test_complete_without_tracking_uses_conservative_existing_clutter_preview(
     candidate = cache / "module.pyc"
     candidate.write_bytes(b"cache")
 
-    assert main(["complete", "--root", str(root), "--state-dir", str(state)]) == 6
+    assert main(["complete", "--root", str(root), "--state-dir", str(state)]) == 0
     output = capsys.readouterr().out
     assert "historical ownership cannot be established" in output
-    assert "ai-cleaner review --proposal" in output
+    assert "No eligible cleanup candidates" in output
     assert candidate.read_bytes() == b"cache"
 
 
@@ -181,12 +294,12 @@ def test_separate_purge_review_removes_only_recovery_payload(
 ) -> None:
     root = tmp_path / "project"
     state = tmp_path / "state"
-    cache = root / "__pycache__"
-    cache.mkdir(parents=True)
-    candidate = cache / "module.pyc"
-    candidate.write_bytes(b"cache")
+    candidate = root / "preview.tmp"
+    _task_id, proposal_id = _tracked_proposal(
+        root, state, {"preview.tmp": b"cache"}, capsys
+    )
     assert run(
-        ["propose", "--root", str(root), "--state-dir", str(state)],
+        ["review", "--proposal", proposal_id, "--state-dir", str(state)],
         interaction=ScriptedReview(),
     ) == 0
     quarantine = _json_line(capsys.readouterr().out)
@@ -209,14 +322,11 @@ def test_stale_multi_item_proposal_moves_nothing_and_completed_proposal_cannot_r
 ) -> None:
     root = tmp_path / "project"
     state = tmp_path / "state"
-    cache = root / "__pycache__"
-    cache.mkdir(parents=True)
-    first = cache / "first.pyc"
-    second = cache / "second.pyc"
-    first.write_bytes(b"first")
-    second.write_bytes(b"second")
-    assert main(["propose", "--root", str(root), "--state-dir", str(state), "--json"]) == 6
-    proposal_id = _proposal_id(capsys.readouterr().out)
+    first = root / "first.tmp"
+    second = root / "second.tmp"
+    _task_id, proposal_id = _tracked_proposal(
+        root, state, {"first.tmp": b"first", "second.tmp": b"second"}, capsys
+    )
 
     second.write_bytes(b"SECOND")
     assert run(
@@ -227,15 +337,17 @@ def test_stale_multi_item_proposal_moves_nothing_and_completed_proposal_cannot_r
     assert first.read_bytes() == b"first"
     assert second.read_bytes() == b"SECOND"
 
-    second.write_bytes(b"second")
-    assert main(["propose", "--root", str(root), "--state-dir", str(state), "--json"]) == 6
-    fresh = _proposal_id(capsys.readouterr().out)
+    fresh_root = tmp_path / "fresh-project"
+    fresh_state = tmp_path / "fresh-state"
+    _fresh_task, fresh = _tracked_proposal(
+        fresh_root, fresh_state, {"fresh.tmp": b"fresh"}, capsys
+    )
     assert run(
-        ["review", "--proposal", fresh, "--state-dir", str(state)],
+        ["review", "--proposal", fresh, "--state-dir", str(fresh_state)],
         interaction=ScriptedReview(),
     ) == 0
     capsys.readouterr()
     assert run(
-        ["review", "--proposal", fresh, "--state-dir", str(state)],
+        ["review", "--proposal", fresh, "--state-dir", str(fresh_state)],
         interaction=ScriptedReview(),
     ) == 5

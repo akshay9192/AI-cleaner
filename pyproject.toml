@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "ai-cleaner"
 version = "0.1.0"
-description = "Human-reviewed, recoverable cleanup for Windows project folders"
+description = "Minimal popup-reviewed, recoverable cleanup for Windows project folders"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 license = { file = "LICENSE" }

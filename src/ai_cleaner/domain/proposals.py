@@ -34,6 +34,7 @@ class Proposal:
     items: tuple[ProposalItem, ...]
     items_digest: str
     created_at: str
+    task_label: str | None = None
 
     @property
     def logical_bytes(self) -> int:
@@ -50,6 +51,7 @@ class Proposal:
             "items": [item.to_dict() for item in self.items],
             "items_digest": self.items_digest,
             "created_at": self.created_at,
+            "task_label": self.task_label,
             "logical_bytes": self.logical_bytes,
             "recovery_behavior": "same-volume quarantine; no disk space is reclaimed",
         }

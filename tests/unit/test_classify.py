@@ -44,6 +44,18 @@ def test_pins_git_and_hard_protection_override_scratch() -> None:
     assert all(not item.selectable for item in classified)
 
 
+def test_protected_directory_applies_to_descendants() -> None:
+    item = classify_files(
+        [observation("dist\\nested\\result.tmp")],
+        git=GitEvidence("not-repository", frozenset()),
+        pins={"dist"},
+        declarations={"dist\\nested\\result.tmp": "scratch"},
+    )[0]
+
+    assert item.category is Category.PROTECTED
+    assert not item.selectable
+
+
 def test_git_failure_protects_conservatively(tmp_path) -> None:  # type: ignore[no-untyped-def]
     (tmp_path / ".git").mkdir()
 

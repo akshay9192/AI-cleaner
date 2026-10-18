@@ -139,7 +139,9 @@ def _classify(
     ) -> ClassifiedFile:
         return ClassifiedFile(observation, category, code, explanation, evidence, selectable)
 
-    if normalized in pins:
+    if normalized in pins or any(
+        normalized.startswith(pin.rstrip("\\/") + "\\") for pin in pins
+    ):
         return result(Category.PROTECTED, "user-pinned", "Pinned by the user", "explicit pin")
     if normalized in active_task_paths:
         return result(

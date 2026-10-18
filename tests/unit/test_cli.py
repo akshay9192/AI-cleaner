@@ -17,6 +17,7 @@ def test_help_exposes_terminal_workflow_without_approval_bypass() -> None:
     help_text = parser.format_help()
     assert "doctor" in help_text
     assert "complete" in help_text
+    assert "register-temp" in help_text
     assert "review" in help_text
     assert "restore" in help_text
     assert "purge" in help_text

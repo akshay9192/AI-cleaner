@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -167,7 +166,7 @@ def test_active_task_blocks_even_unscoped_cleanup_proposal(tmp_path: Path) -> No
     assert target.read_bytes() == b"blocked"
 
 
-def test_cli_propose_is_read_only_and_emits_reviewable_json(
+def test_cli_propose_without_task_baseline_retains_existing_clutter(
     tmp_path: Path, capsys
 ) -> None:  # type: ignore[no-untyped-def]
     root = tmp_path / "project"
@@ -188,12 +187,6 @@ def test_cli_propose_is_read_only_and_emits_reviewable_json(
         ]
     )
     output = capsys.readouterr().out
-    result = json.loads(output)
-
-    assert code == 6
-    assert result["items"][0]["relative_path"] == "__pycache__\\module.pyc"
-    assert result["recovery_behavior"].endswith("no disk space is reclaimed")
-    assert result["status"] == "review-required"
-    assert result["mutation_performed"] is False
+    assert code == 0
+    assert output == ""
     assert payload.read_bytes() == b"bytecode"
-    assert result["review_command"].startswith("ai-cleaner review --proposal ")

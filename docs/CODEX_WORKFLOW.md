@@ -1,41 +1,23 @@
-# Codex and BMAD workflow
+# Repository agent instruction
 
-Use AI-cleaner cooperatively; do not parse private agent logs or install global hooks.
+Use this snippet in the repository task context; do not install global hooks:
 
-Before work starts:
+> Before generating task artifacts, run `python ai_cleaner.py start --root . --label "TASK"` and
+> retain the returned task ID. After creating a disposable output, run `python ai_cleaner.py
+> register-temp --task TASK_ID --path PATH`. Protect final deliverables or directories with `python
+> ai_cleaner.py protect --task TASK_ID --path PATH`. When the user explicitly says the task is
+> finished, invoke `python ai_cleaner.py complete --task TASK_ID`. At normal completion, invoke it
+> only if the user enabled this convention. If no popup is available, leave the pending proposal
+> untouched and report its exact review command. Never select files, confirm a popup, purge, or
+> otherwise approve cleanup on the user's behalf.
 
-```powershell
-ai-cleaner start --root . --label "Short task description"
-```
+Registration is a declaration, not proof that an agent created a file. Register a temporary only
+after writing it; later modifications require re-registration before completion. Existing files,
+unregistered outputs, maintainable source, and final deliverables remain protected.
 
-During work, declare intermediates and protect useful outputs. Declarations are evidence supplied
-by the agent or user, not proof that the agent created a file, and scratch declarations cannot
-override hard protections.
+AI-cleaner does not listen for arbitrary natural-language completion, parse private agent logs,
+watch terminal input, infer completion from Git, or run a background monitor.
 
-```powershell
-ai-cleaner register --root . --path "scratch\preview.aux" --role scratch
-ai-cleaner protect --root . --path "dist\final-output.zip"
-```
-
-When the work is genuinely complete, invoke the explicit completion signal once:
-
-```powershell
-ai-cleaner complete --root .
-```
-
-Completion records the end snapshot and prepares cleanup; it is not approval. If the command is
-running without an interactive human terminal, leave the pending proposal unchanged and show its
-review command:
-
-```powershell
-ai-cleaner review --proposal PROPOSAL_ID
-```
-
-An agent must never approve cleanup, supply piped confirmation, or invoke restore/purge approval
-on the user's behalf. Only the human terminal review may select files and confirm the exact digest.
-Keep maintainable source and final outputs outside disposable scratch locations.
-
-BMAD is a development workflow, not an application dependency. In the 18 October 2026 managed
-session its renderer remained unavailable because the resolved WinGet `uv.exe` could not be read
-or executed; it was not rerun contrary to its instructions. Standard planning, review, and
-verification continued, and no BMAD check is claimed for that continuation.
+BMAD is a development workflow, not a runtime dependency. Its renderer remained unavailable in
+the 18 October 2026 managed session because the resolved WinGet `uv.exe` could not be accessed. It
+was not rerun or bypassed, and no BMAD check is claimed.

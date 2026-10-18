@@ -21,15 +21,21 @@ inputs, and user pins are protected by default.
 
 Scanning, preview, tracking, registration, and completion do not mutate inspected user files. A
 cleanup proposal is an exact immutable list. Production code creates an ephemeral, single-use
-capability only after interactive terminal review shows the exact selection, count, logical size,
-recovery destination, and digest and receives the matching typed confirmation. Every candidate
-defaults to keep. Completion is analysis authorisation, not cleanup approval.
+capability only after a tkinter popup shows the unchecked candidates and a separate final popup
+confirms the exact selection, count, logical size, recovery destination, and digest. Completion is
+analysis authorisation, not cleanup approval.
 
-Both stdin and stdout must be TTYs. Piped answers, redirected input, EOF, serialized approval,
-agent-supplied booleans, and automated `--yes`/`--force` modes cannot approve supported mutation.
-Non-interactive completion stores a pending proposal, moves nothing, exits 6, and shows the exact
-interactive review command. The TTY check is a practical interaction safeguard, not proof that a
-human is present against malware or a privileged process controlling the same account or terminal.
+Piped answers, serialized approval, agent-supplied booleans, and automated `--yes`/`--force` modes
+cannot approve supported mutation. If tkinter, the display, or popup construction fails,
+completion stores a pending proposal, moves nothing, exits 6, and shows the exact review command.
+Closing or cancelling any popup keeps files. The popup is a practical intentional-consent
+safeguard, not proof of a human against malware controlling the same account or display.
+
+Task cleanup candidates are limited to files absent from the baseline and explicitly registered
+after creation with a handle identity and content hash. The current file must still match that
+registration. All unregistered additions and changed registrations are retained as uncertain.
+Source-like files remain protected even when registered. Explicit directory protection applies to
+every descendant.
 
 Cancellation or missing, stale, expired, replayed, previously executed, or mismatched approval
 fails closed. The entire exact plan is revalidated before its first mutation. Restore is

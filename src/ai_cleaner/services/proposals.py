@@ -87,6 +87,7 @@ class ProposalService:
         policy = policy_digest(policy_version)
         absolute_root = str(root.absolute())
         absolute_recovery = str(recovery_root.absolute())
+        task = self.database.task(task_id) if task_id else None
         proposal = Proposal(
             proposal_id=proposal_id,
             project_id=project_id,
@@ -104,6 +105,7 @@ class ProposalService:
                 recovery_root=absolute_recovery,
             ),
             created_at=utc_now(),
+            task_label=str(task["label"]) if task is not None else None,
         )
         self.database.save_proposal(proposal)
         return proposal
@@ -121,7 +123,15 @@ class ProposalService:
         ):
             raise FileChangedError("proposal operations changed after review")
         root = Path(proposal.root)
+        protected = self.database.protections(proposal.project_id)
         for item in proposal.items:
+            normalized = item.relative_path.casefold()
+            if normalized in protected or any(
+                normalized.startswith(pin.rstrip("\\/") + "\\") for pin in protected
+            ):
+                raise FileChangedError(
+                    f"file became protected after review: {item.relative_path}"
+                )
             path = root / item.relative_path
             observed = self.filesystem.validate_candidate(path, root)
             expected = self.identity(item, observed.final_path)
@@ -170,6 +180,7 @@ class ProposalService:
             items=selected,
             items_digest=digest,
             created_at=utc_now(),
+            task_label=proposal.task_label,
         )
         self.revalidate(subset)
         self.database.save_proposal(subset)

@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from pathlib import Path, PurePath
 from typing import Any, cast
 
-from ai_cleaner.platform.windows_fs import BoundaryError, WindowsFilesystem
+from ai_cleaner.platform.windows_fs import BoundaryError, FileChangedError, WindowsFilesystem
 from ai_cleaner.services.scan import Scanner
 from ai_cleaner.storage.database import Database
 
@@ -109,6 +109,64 @@ class TaskService:
                 """INSERT OR IGNORE INTO artifact_declarations
                    VALUES (?, ?, ?, ?, ?, ?)""",
                 (str(uuid.uuid4()), task_id, normalized, role, source, utc_now()),
+            )
+
+    def register_temp(self, task_id: str, relative_path: str, source: str = "cli") -> None:
+        task = self._require_task(task_id)
+        if task["status"] != "active":
+            raise TaskConflictError("temporary files can be registered only for an active task")
+        project = self._project(str(task["project_id"]))
+        relative = PurePath(relative_path)
+        if relative.is_absolute() or ".." in relative.parts or not relative.parts:
+            raise BoundaryError("registered path must be relative and remain inside the project")
+        normalized = str(relative).replace("/", os.sep)
+        baseline = self.database.observations(str(task["baseline_scan_id"]))
+        if normalized.casefold() in baseline:
+            raise TaskConflictError("files present at task start cannot be registered as temporary")
+        root = Path(str(project["root"]))
+        candidate = (root / normalized).absolute()
+        identity = self.filesystem.validate_candidate(candidate, root)
+        with self.filesystem.open_exclusive_file(candidate) as handle:
+            before = self.filesystem.identity_from_handle(handle)
+            sha256 = self.filesystem.hash_handle(handle)
+            after = self.filesystem.identity_from_handle(handle)
+        if before != after or before != identity:
+            raise FileChangedError("temporary file changed while it was registered")
+        now = utc_now()
+        with self.database.transaction(immediate=True) as connection:
+            existing = connection.execute(
+                """SELECT role FROM artifact_declarations
+                   WHERE task_id = ? AND relative_path = ? COLLATE NOCASE""",
+                (task_id, normalized),
+            ).fetchone()
+            if existing and existing["role"] != "scratch":
+                raise TaskConflictError("path is already registered with a different role")
+            connection.execute(
+                """INSERT OR IGNORE INTO artifact_declarations
+                   VALUES (?, ?, ?, 'scratch', ?, ?)""",
+                (str(uuid.uuid4()), task_id, normalized, source, now),
+            )
+            connection.execute(
+                """INSERT INTO task_temp_files VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(task_id, relative_path) DO UPDATE SET
+                     volume_serial = excluded.volume_serial,
+                     file_index = excluded.file_index,
+                     size = excluded.size,
+                     modified_100ns = excluded.modified_100ns,
+                     attributes = excluded.attributes,
+                     sha256 = excluded.sha256,
+                     registered_at = excluded.registered_at""",
+                (
+                    task_id,
+                    normalized,
+                    identity.volume_serial,
+                    identity.file_index,
+                    identity.size,
+                    identity.modified_100ns,
+                    identity.attributes,
+                    sha256,
+                    now,
+                ),
             )
 
     def finish(

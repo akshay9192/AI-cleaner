@@ -1,82 +1,93 @@
 # AI-cleaner
 
-AI-cleaner is a Windows-first terminal tool for tracking task artifacts, reviewing conservative
-cleanup suggestions, and moving only human-approved files into recoverable storage. Quarantine
-does not reclaim disk space. Restore and permanent purge are separate actions.
+AI-cleaner is a small Windows-first Python tool for tracking declared temporary task artifacts.
+It does not try to identify every file ever created by AI. Only a file created after the task
+baseline, explicitly registered after creation, unchanged since registration, and free of all
+protections can appear as a cleanup candidate.
 
-The v0.1 implementation is local: no desktop window, browser, account, API key, telemetry,
-network service, or LLM is required.
+Approved files move to recoverable same-volume quarantine. This removes workspace clutter but does
+not reclaim disk space; only a separately approved purge can do that.
 
-## Requirements and installation
+## Requirements and setup
 
-- Windows 11 x64 with a local NTFS project folder
-- CPython 3.12
-- Git is optional, but enables tracked-file protection
+- Windows 11 x64 and a local NTFS project folder
+- CPython 3.12 with standard-library tkinter available for popup approval
 
-Install the command from this checkout:
+From this checkout:
 
 ```powershell
 py -3.12 -m venv .venv
 & ".\.venv\Scripts\Activate.ps1"
 python -m pip install -e .
-ai-cleaner doctor
-ai-cleaner --help
+python ai_cleaner.py doctor
 ```
 
-The repository wrapper uses the same implementation without duplicating cleanup logic:
+The root script is the primary interface. The installed `ai-cleaner` command and
+`scripts/project_cleanup.py` are compatibility entry points using the same implementation; none is
+a standalone file when copied away from the package.
+
+## Complete example
 
 ```powershell
-python scripts/project_cleanup.py --help
+$task = python ai_cleaner.py start --root . --label "Build report" | ConvertFrom-Json
+
+# Create scratch\preview.aux first, then fingerprint it as disposable:
+python ai_cleaner.py register-temp --task $task.task_id --path "scratch\preview.aux"
+
+# A file or directory protected here, including descendants, cannot be cleaned:
+python ai_cleaner.py protect --task $task.task_id --path "dist\final-report.pdf"
+
+python ai_cleaner.py complete --task $task.task_id
 ```
 
-The wrapper is not standalone; it requires this checkout and its `src` tree. Copying only the
-wrapper file does not install AI-cleaner.
+`complete` captures the ending state and opens a compact popup. Candidate checkboxes start
+unchecked. The popup can keep/protect selected files, move selected files to quarantine, or cancel.
+A second popup confirms the exact paths, count, size, recovery destination, and proposal digest.
 
-## Tracked task workflow
+If tkinter or a graphical display is unavailable, nothing moves. The proposal remains pending,
+the command exits 6, and it prints:
 
 ```powershell
-ai-cleaner start --root . --label "Implement feature"
-ai-cleaner register --root . --path "scratch\preview.aux" --role scratch
-ai-cleaner protect --root . --path "dist\final-output.zip"
-# Work normally, then explicitly signal completion:
-ai-cleaner complete --root .
+python ai_cleaner.py review --proposal PROPOSAL_ID
 ```
 
-`complete` records the end state and prepares a proposal. It does not approve cleanup. In a real
-interactive terminal, review defaults every candidate to keep and requires an exact final
-confirmation. Without an interactive stdin and stdout, it moves nothing, exits 6, stores the
-pending proposal, and prints the command to run later:
+After quarantine, use the reported run ID:
 
 ```powershell
-ai-cleaner review --proposal PROPOSAL_ID
+python ai_cleaner.py restore --run RUN_ID
+python ai_cleaner.py purge --run RUN_ID
 ```
 
-After quarantine, the result prints a run ID:
+Restore verifies the payload and never overwrites an occupied destination. Purge opens its own
+unchecked review and irreversible confirmation. There is no `--yes`, automatic approval, timeout
+approval, or agent-facing approval bypass.
 
-```powershell
-ai-cleaner history --root .
-ai-cleaner restore --run RUN_ID
-ai-cleaner purge --run RUN_ID
-```
+## Protection and limitations
 
-Restore never overwrites an occupied destination. Purge has its own irreversible review and fresh
-confirmation. There is no `--yes`, `--force`, piped-answer approval, or unattended mutation mode.
+Files present at task start, unregistered files, modified registrations, protected directory
+descendants, source/tests/docs/plans/configuration/lockfiles, credentials, Git metadata, and the
+cleaner's state/recovery data are retained. Source-like scratch files remain protected even when
+registered in this release. Symlinks, junctions, hard links, alternate streams, unsupported
+filesystems, broad roots, and path/identity races fail closed.
 
-For an untracked folder, use `ai-cleaner preview --root .`. It can identify conservative existing
-clutter candidates but cannot establish historical ownership without a task baseline.
+The popup is an intentional-consent mechanism, not a security boundary against malicious software
+running as the same user. AI-cleaner does not monitor speech, terminal text, private agent logs,
+Git commits, or background processes.
 
-State is stored in `%LOCALAPPDATA%\AI-cleaner` by default. Recovery must be on the same supported
-volume as the selected project and outside it.
+## Agent completion convention
 
-## Development verification
+Add the repository-local guidance in `docs/CODEX_WORKFLOW.md` to the task context. In short: start
+tracking first; register disposable outputs after creating them; protect deliverables; invoke
+`complete` when the user explicitly says the task is finished (or at normal completion only when
+the user enabled that convention); and never approve the popup for the user.
 
-With the locked development environment already synchronized:
+## Development checks
 
 ```powershell
 .\.venv\Scripts\ruff.exe check .
 .\.venv\Scripts\mypy.exe src
-.\.venv\Scripts\pytest.exe
+.\.venv\Scripts\pytest.exe -p no:cacheprovider
 ```
 
-See `docs/SAFETY.md`, `docs/CODEX_WORKFLOW.md`, `docs/VALIDATION.md`, and
-`AI_CLEANER_PROJECT_PLAN.md` for the exact safety boundary and recorded evidence.
+See `docs/SAFETY.md`, `docs/VALIDATION.md`, and `IMPLEMENTATION_STATUS.md` for the supported boundary
+and current blocked native checks.

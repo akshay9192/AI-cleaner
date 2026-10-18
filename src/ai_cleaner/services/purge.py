@@ -80,6 +80,7 @@ class PurgeService:
                 proposal_digest=plan.digest,
                 action="purge",
                 started_at=utc_now(),
+                approved_at=utc_now(),
             )
             try:
                 for item in plan.items:

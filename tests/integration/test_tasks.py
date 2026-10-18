@@ -68,6 +68,31 @@ def test_only_one_active_task_per_root(service: TaskService, tmp_path: Path) -> 
         service.start(root, "second")
 
 
+def test_temp_registration_requires_task_created_file_and_refreshes_fingerprint(
+    service: TaskService, tmp_path: Path
+) -> None:
+    root = tmp_path / "project"
+    root.mkdir()
+    existing = root / "existing.tmp"
+    existing.write_bytes(b"baseline")
+    task_id = service.start(root, "fixture")
+
+    with pytest.raises(TaskConflictError, match="present at task start"):
+        service.register_temp(task_id, "existing.tmp")
+
+    temporary = root / "preview.tmp"
+    temporary.write_bytes(b"first")
+    service.register_temp(task_id, "preview.tmp")
+    first = service.database.temp_registrations(task_id)["preview.tmp"]
+
+    temporary.write_bytes(b"changed")
+    service.register_temp(task_id, "preview.tmp")
+    refreshed = service.database.temp_registrations(task_id)["preview.tmp"]
+
+    assert first["sha256"] != refreshed["sha256"]
+    assert service.database.task_declarations(task_id)["preview.tmp"] == "scratch"
+
+
 def test_cli_task_start_register_finish_journey(tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
     root = tmp_path / "project"
     state = tmp_path / "state"

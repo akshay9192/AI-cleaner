@@ -164,6 +164,9 @@ class QuarantineService:
                 proposal_digest=proposal.items_digest,
                 action="quarantine",
                 started_at=utc_now(),
+                proposal_id=proposal.proposal_id,
+                task_id=proposal.task_id,
+                approved_at=utc_now(),
             )
             try:
                 for item in proposal.items:

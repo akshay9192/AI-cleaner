@@ -10,7 +10,7 @@ from typing import cast
 from ai_cleaner.domain.models import ScanResult
 from ai_cleaner.domain.proposals import Proposal, ProposalItem
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS projects (
@@ -79,6 +79,18 @@ CREATE TABLE IF NOT EXISTS artifact_declarations (
     created_at TEXT NOT NULL,
     UNIQUE(task_id, relative_path, role)
 );
+CREATE TABLE IF NOT EXISTS task_temp_files (
+    task_id TEXT NOT NULL REFERENCES tasks(id),
+    relative_path TEXT NOT NULL COLLATE NOCASE,
+    volume_serial INTEGER NOT NULL,
+    file_index INTEGER NOT NULL,
+    size INTEGER NOT NULL,
+    modified_100ns INTEGER NOT NULL,
+    attributes INTEGER NOT NULL,
+    sha256 TEXT NOT NULL,
+    registered_at TEXT NOT NULL,
+    PRIMARY KEY (task_id, relative_path)
+);
 CREATE TABLE IF NOT EXISTS proposals (
     id TEXT PRIMARY KEY,
     project_id TEXT NOT NULL REFERENCES projects(id),
@@ -109,7 +121,10 @@ CREATE TABLE IF NOT EXISTS operation_runs (
     action TEXT NOT NULL,
     status TEXT NOT NULL,
     started_at TEXT NOT NULL,
-    ended_at TEXT
+    ended_at TEXT,
+    proposal_id TEXT,
+    task_id TEXT,
+    approved_at TEXT
 );
 CREATE TABLE IF NOT EXISTS operation_items (
     id TEXT PRIMARY KEY,
@@ -164,11 +179,34 @@ class Database:
             if version == 0:
                 connection.executescript(SCHEMA)
                 connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
-            elif version == 1:
+                return
+            if version == 1:
                 connection.execute("ALTER TABLE operation_runs ADD COLUMN project_id TEXT")
-                connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
-            elif version != SCHEMA_VERSION:
+                version = 2
+            if version == 2:
+                connection.executescript(
+                    """
+                    CREATE TABLE IF NOT EXISTS task_temp_files (
+                        task_id TEXT NOT NULL REFERENCES tasks(id),
+                        relative_path TEXT NOT NULL COLLATE NOCASE,
+                        volume_serial INTEGER NOT NULL,
+                        file_index INTEGER NOT NULL,
+                        size INTEGER NOT NULL,
+                        modified_100ns INTEGER NOT NULL,
+                        attributes INTEGER NOT NULL,
+                        sha256 TEXT NOT NULL,
+                        registered_at TEXT NOT NULL,
+                        PRIMARY KEY (task_id, relative_path)
+                    );
+                    ALTER TABLE operation_runs ADD COLUMN proposal_id TEXT;
+                    ALTER TABLE operation_runs ADD COLUMN task_id TEXT;
+                    ALTER TABLE operation_runs ADD COLUMN approved_at TEXT;
+                    """
+                )
+                version = 3
+            if version != SCHEMA_VERSION:
                 raise RuntimeError(f"no migration path from schema {version}")
+            connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     @contextmanager
     def transaction(self, *, immediate: bool = False) -> Iterator[sqlite3.Connection]:
@@ -340,6 +378,13 @@ class Database:
             ).fetchall()
         return {str(row["relative_path"]): str(row["role"]) for row in rows}
 
+    def temp_registrations(self, task_id: str) -> dict[str, sqlite3.Row]:
+        with self.connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM task_temp_files WHERE task_id = ?", (task_id,)
+            ).fetchall()
+        return {str(row["relative_path"]).casefold(): row for row in rows}
+
     def observations(self, scan_id: str) -> dict[str, sqlite3.Row]:
         with self.connect() as connection:
             rows = connection.execute(
@@ -384,8 +429,9 @@ class Database:
     def proposal(self, proposal_id: str) -> Proposal | None:
         with self.connect() as connection:
             row = connection.execute(
-                """SELECT p.*, pr.root, pr.recovery_root
+                """SELECT p.*, pr.root, pr.recovery_root, t.label AS task_label
                    FROM proposals p JOIN projects pr ON pr.id = p.project_id
+                   LEFT JOIN tasks t ON t.id = p.task_id
                    WHERE p.id = ?""",
                 (proposal_id,),
             ).fetchone()
@@ -420,6 +466,7 @@ class Database:
             items=items,
             items_digest=str(row["items_digest"]),
             created_at=str(row["created_at"]),
+            task_label=str(row["task_label"]) if row["task_label"] is not None else None,
         )
 
     def proposal_by_digest(self, items_digest: str) -> Proposal | None:
@@ -463,13 +510,26 @@ class Database:
         proposal_digest: str,
         action: str,
         started_at: str,
+        proposal_id: str | None = None,
+        task_id: str | None = None,
+        approved_at: str | None = None,
     ) -> None:
         with self.transaction(immediate=True) as connection:
             connection.execute(
                 """INSERT INTO operation_runs
-                   (id, project_id, proposal_digest, action, status, started_at, ended_at)
-                   VALUES (?, ?, ?, ?, 'running', ?, NULL)""",
-                (run_id, project_id, proposal_digest, action, started_at),
+                   (id, project_id, proposal_digest, action, status, started_at, ended_at,
+                    proposal_id, task_id, approved_at)
+                   VALUES (?, ?, ?, ?, 'running', ?, NULL, ?, ?, ?)""",
+                (
+                    run_id,
+                    project_id,
+                    proposal_digest,
+                    action,
+                    started_at,
+                    proposal_id,
+                    task_id,
+                    approved_at,
+                ),
             )
 
     def set_run_status(self, run_id: str, status: str, ended_at: str | None) -> None:

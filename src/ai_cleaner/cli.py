@@ -16,12 +16,13 @@ from typing import Any
 
 from ai_cleaner import __version__
 from ai_cleaner.domain.approval import ApprovalBroker, ApprovalError
-from ai_cleaner.domain.models import ClassifiedFile
+from ai_cleaner.domain.models import Category, ClassifiedFile
 from ai_cleaner.platform.windows_fs import (
     BoundaryError,
     UnsupportedFilesystemError,
     WindowsFilesystem,
 )
+from ai_cleaner.popup import PopupInteraction
 from ai_cleaner.services.classify import classify_files, git_evidence
 from ai_cleaner.services.operations import OperationConflictError, QuarantineService
 from ai_cleaner.services.proposals import ProposalError, ProposalService
@@ -31,7 +32,7 @@ from ai_cleaner.services.scan import DEFAULT_ENTRY_LIMIT, Scanner
 from ai_cleaner.services.tasks import TaskConflictError, TaskDiff, TaskService
 from ai_cleaner.storage.config import StatePaths
 from ai_cleaner.storage.database import Database
-from ai_cleaner.terminal import ConsoleInteraction, ReviewInteraction
+from ai_cleaner.terminal import ReviewInteraction
 
 EXIT_OK = 0
 EXIT_ERROR = 1
@@ -63,10 +64,14 @@ def _add_root(parser: argparse.ArgumentParser) -> None:
     _add_state_dir(parser)
 
 
+def _add_optional_root(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--root", type=Path)
+    _add_state_dir(parser)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="ai-cleaner",
-        description="Track task artifacts and review recoverable cleanup in the terminal.",
+        description="Track task artifacts and review cleanup in a lightweight approval popup.",
     )
     parser.add_argument("--version", action="version", version=__version__)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -88,13 +93,19 @@ def build_parser() -> argparse.ArgumentParser:
     register.add_argument("--task")
     register.add_argument("--path", required=True)
     register.add_argument("--role", required=True, choices=("scratch", "deliverable", "input"))
+    register_temp = commands.add_parser(
+        "register-temp", help="fingerprint a task-created disposable file"
+    )
+    register_temp.add_argument("--task", required=True)
+    register_temp.add_argument("--path", required=True)
+    _add_state_dir(register_temp)
     protect = commands.add_parser("protect", help="protect a path as a deliverable")
-    _add_root(protect)
+    _add_optional_root(protect)
     protect.add_argument("--task")
     protect.add_argument("--path", required=True)
     protect.add_argument("--reason", default="Protected explicitly from the terminal")
     complete = commands.add_parser("complete", help="finish a task and prepare/review cleanup")
-    _add_root(complete)
+    _add_optional_root(complete)
     complete.add_argument("--task")
     review = commands.add_parser("review", help="interactively review a pending proposal")
     review.add_argument("--proposal", required=True)
@@ -197,6 +208,16 @@ def _resolve_task(runtime: Runtime, root: Path, task_id: str | None) -> Any:
     return tasks[0]
 
 
+def _task_root(runtime: Runtime, task_id: str) -> Path:
+    task = runtime.database.task(task_id)
+    if task is None:
+        raise ValueError(f"unknown task: {task_id}")
+    project = runtime.database.project(str(task["project_id"]))
+    if project is None:
+        raise RuntimeError("task project metadata is missing")
+    return Path(str(project["root"]))
+
+
 def _normalize_relative(root: Path, value: str) -> str:
     relative = PurePath(value)
     if relative.is_absolute() or ".." in relative.parts or not relative.parts:
@@ -238,6 +259,88 @@ def _classifications(
         declarations=declarations,
         active_task_paths=protected_by_task,
     )
+    if task_id:
+        registrations = runtime.database.temp_registrations(task_id)
+        constrained: list[ClassifiedFile] = []
+        for item in classified:
+            key = item.observation.relative_path.casefold()
+            registration = registrations.get(key)
+            if item.category is Category.PROTECTED:
+                constrained.append(item)
+                continue
+            if registration is None:
+                constrained.append(
+                    replace(
+                        item,
+                        category=Category.UNKNOWN,
+                        reason_code="not-registered-temp",
+                        explanation="Not explicitly registered as disposable during this task",
+                        ownership_evidence="retained by default",
+                        selectable=False,
+                    )
+                )
+                continue
+            try:
+                path = root / item.observation.relative_path
+                identity = runtime.filesystem.validate_candidate(path, root)
+                with runtime.filesystem.open_exclusive_file(path) as handle:
+                    before = runtime.filesystem.identity_from_handle(handle)
+                    sha256 = runtime.filesystem.hash_handle(handle)
+                    after = runtime.filesystem.identity_from_handle(handle)
+                matches = (
+                    before == after
+                    and before == identity
+                    and before.volume_serial == int(registration["volume_serial"])
+                    and before.file_index == int(registration["file_index"])
+                    and before.size == int(registration["size"])
+                    and before.modified_100ns == int(registration["modified_100ns"])
+                    and before.attributes == int(registration["attributes"])
+                    and sha256 == str(registration["sha256"])
+                )
+            except (OSError, RuntimeError, ValueError):
+                matches = False
+            if not matches:
+                constrained.append(
+                    replace(
+                        item,
+                        category=Category.UNKNOWN,
+                        reason_code="registered-temp-changed",
+                        explanation="Registered temporary file changed; re-register before cleanup",
+                        ownership_evidence="fingerprint no longer matches",
+                        selectable=False,
+                    )
+                )
+                continue
+            constrained.append(
+                replace(
+                    item,
+                    category=Category.REGISTERED_TASK_SCRATCH,
+                    reason_code="registered-temp-unchanged",
+                    explanation=(
+                        "Created during this task; registered as disposable; unchanged since "
+                        "registration; not protected as a deliverable"
+                    ),
+                    ownership_evidence="baseline absence plus explicit fingerprinted registration",
+                    selectable=True,
+                )
+            )
+        classified = constrained
+    else:
+        classified = [
+            (
+                replace(
+                    item,
+                    category=Category.UNKNOWN,
+                    reason_code="no-task-baseline",
+                    explanation="No task baseline or disposable registration establishes ownership",
+                    ownership_evidence="historical ownership unknown; retained by default",
+                    selectable=False,
+                )
+                if item.selectable
+                else item
+            )
+            for item in classified
+        ]
     return (
         project_id,
         [
@@ -305,8 +408,8 @@ def _prepare_pending(
 
 
 def _review_required(proposal_id: str) -> int:
-    print("Human interactive review is required; no files were moved.")
-    print(f"Run in a human terminal: ai-cleaner review --proposal {proposal_id}")
+    print("The approval popup could not be displayed; no files were moved.")
+    print(f"Review later with: python ai_cleaner.py review --proposal {proposal_id}")
     return EXIT_REVIEW_REQUIRED
 
 
@@ -319,13 +422,15 @@ def _review_proposal(runtime: Runtime, proposal_id: str, interaction: ReviewInte
     if not interaction.interactive:
         return _review_required(proposal_id)
     decision = interaction.choose_cleanup(proposal)
+    if not interaction.interactive:
+        return _review_required(proposal_id)
     for relative_path in decision.protected:
         runtime.database.add_protection(
             protection_id=str(uuid.uuid4()),
             project_id=proposal.project_id,
             relative_path=relative_path,
-            reason="Protected during terminal review",
-            origin="terminal-review",
+            reason="Protected during popup review",
+            origin="popup-review",
             created_at=datetime.now(UTC).isoformat(),
         )
     if decision.cancelled or not decision.selected:
@@ -343,7 +448,10 @@ def _review_proposal(runtime: Runtime, proposal_id: str, interaction: ReviewInte
         f"Recovery destination: {exact.recovery_root}",
         "Moving files to recovery does not reclaim disk space.",
     )
-    if not interaction.confirm_exact("MOVE", exact.items_digest, summary):
+    confirmed = interaction.confirm_exact("MOVE", exact.items_digest, summary)
+    if not interaction.interactive:
+        return _review_required(exact.proposal_id)
+    if not confirmed:
         print("Confirmation did not match; every file was retained.")
         return EXIT_CANCELLED
     approvals = ApprovalBroker()
@@ -359,7 +467,7 @@ def _review_proposal(runtime: Runtime, proposal_id: str, interaction: ReviewInte
         runtime.state.locks / f"{exact.project_id}.lock",
     ).execute(exact, capability)
     print(json.dumps(result.to_dict(), ensure_ascii=False, sort_keys=True))
-    print(f"Restore with: ai-cleaner restore --run {result.run_id}")
+    print(f"Restore with: python ai_cleaner.py restore --run {result.run_id}")
     return EXIT_OK if result.status == "complete" else EXIT_PARTIAL
 
 
@@ -394,28 +502,66 @@ def _start(args: argparse.Namespace) -> int:
 
 def _register(args: argparse.Namespace, *, protect: bool = False) -> int:
     runtime = _runtime(args.state_dir)
-    project_id, root = _ensure_project(runtime, args.root)
+    if args.root is None:
+        if not args.task:
+            raise ValueError("pass --task, or select a project with --root")
+        root = _task_root(runtime, args.task)
+    else:
+        root = args.root
+    project_id, root = _ensure_project(runtime, root)
     task = _resolve_task(runtime, root, args.task)
     task_id = str(task["id"])
     normalized = _normalize_relative(root, args.path)
     role = "deliverable" if protect else args.role
-    runtime.tasks.register(task_id, normalized, role)
     if protect:
+        declarations = {
+            path.casefold(): value
+            for path, value in runtime.database.task_declarations(task_id).items()
+        }
+        if normalized.casefold() not in declarations:
+            runtime.tasks.register(task_id, normalized, role)
         runtime.database.add_protection(
             protection_id=str(uuid.uuid4()),
             project_id=project_id,
             relative_path=normalized,
             reason=args.reason,
-            origin="terminal",
+            origin="script",
             created_at=datetime.now(UTC).isoformat(),
         )
+    else:
+        runtime.tasks.register(task_id, normalized, role)
     print(json.dumps({"task_id": task_id, "path": normalized, "role": role}, sort_keys=True))
+    return EXIT_OK
+
+
+def _register_temp(args: argparse.Namespace) -> int:
+    runtime = _runtime(args.state_dir)
+    root = _task_root(runtime, args.task)
+    normalized = _normalize_relative(root, args.path)
+    runtime.tasks.register_temp(args.task, normalized)
+    print(
+        json.dumps(
+            {
+                "task_id": args.task,
+                "path": normalized,
+                "role": "temporary",
+                "fingerprinted": True,
+            },
+            sort_keys=True,
+        )
+    )
     return EXIT_OK
 
 
 def _complete(args: argparse.Namespace, interaction: ReviewInteraction) -> int:
     runtime = _runtime(args.state_dir)
-    project_id, root = _ensure_project(runtime, args.root)
+    if args.root is None:
+        if not args.task:
+            raise ValueError("complete requires --task or --root")
+        root = _task_root(runtime, args.task)
+    else:
+        root = args.root
+    project_id, root = _ensure_project(runtime, root)
     if args.task is None and not runtime.database.unresolved_tasks(project_id):
         print(
             "No tracked task baseline exists. Showing a conservative existing-clutter review; "
@@ -423,6 +569,9 @@ def _complete(args: argparse.Namespace, interaction: ReviewInteraction) -> int:
         )
         proposal = _prepare_pending(runtime, root, None)
         if proposal is None:
+            notifier = getattr(interaction, "show_nothing_eligible", None)
+            if callable(notifier):
+                notifier()
             return EXIT_OK
         return _review_proposal(runtime, proposal.proposal_id, interaction)
     task = _resolve_task(runtime, root, args.task)
@@ -431,6 +580,9 @@ def _complete(args: argparse.Namespace, interaction: ReviewInteraction) -> int:
     runtime.tasks.finish(task_id, excluded_roots=(runtime.state.root, runtime.state.recovery))
     proposal = _prepare_pending(runtime, root, task_id)
     if proposal is None:
+        notifier = getattr(interaction, "show_nothing_eligible", None)
+        if callable(notifier):
+            notifier()
         return EXIT_OK
     return _review_proposal(runtime, proposal.proposal_id, interaction)
 
@@ -455,7 +607,7 @@ def _propose(args: argparse.Namespace, interaction: ReviewInteraction) -> int:
             {
                 "status": "review-required",
                 "mutation_performed": False,
-                "review_command": f"ai-cleaner review --proposal {proposal.proposal_id}",
+                "review_command": f"python ai_cleaner.py review --proposal {proposal.proposal_id}",
             }
         )
         print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
@@ -532,10 +684,14 @@ def _restore(args: argparse.Namespace, interaction: ReviewInteraction) -> int:
     plan = service.prepare_restore(ids, alternatives=alternatives)
     if not interaction.interactive:
         print(json.dumps(plan.to_dict(), ensure_ascii=False, sort_keys=True))
-        print("Human interactive review is required; no payload was restored.")
-        print("Run the same ai-cleaner restore command in a human terminal.")
+        print("The approval popup could not be displayed; no payload was restored.")
+        print("Run the same python ai_cleaner.py restore command in a GUI session.")
         return EXIT_REVIEW_REQUIRED
     decision = interaction.choose_recovery(plan)
+    if not interaction.interactive:
+        print("The approval popup failed; no payload was restored.")
+        print("Run the same python ai_cleaner.py restore command in a GUI session.")
+        return EXIT_REVIEW_REQUIRED
     if decision.cancelled or not decision.selected:
         print("Restore cancelled; every payload was retained.")
         return EXIT_CANCELLED
@@ -549,7 +705,11 @@ def _restore(args: argparse.Namespace, interaction: ReviewInteraction) -> int:
         f"Count: {len(exact.items)}",
         f"Logical bytes: {exact.logical_bytes}",
     )
-    if not interaction.confirm_exact("RESTORE", exact.digest, summary):
+    confirmed = interaction.confirm_exact("RESTORE", exact.digest, summary)
+    if not interaction.interactive:
+        print("The final approval popup failed; no payload was restored.")
+        return EXIT_REVIEW_REQUIRED
+    if not confirmed:
         print("Confirmation did not match; every payload was retained.")
         return EXIT_CANCELLED
     capability = approvals._grant_after_human_review(
@@ -573,10 +733,14 @@ def _purge(args: argparse.Namespace, interaction: ReviewInteraction) -> int:
     plan = service.prepare(ids)
     if not interaction.interactive:
         print(json.dumps(plan.to_dict(), ensure_ascii=False, sort_keys=True))
-        print("Human interactive review is required; no payload was permanently removed.")
-        print("Run the same ai-cleaner purge command in a human terminal.")
+        print("The approval popup could not be displayed; no payload was permanently removed.")
+        print("Run the same python ai_cleaner.py purge command in a GUI session.")
         return EXIT_REVIEW_REQUIRED
     decision = interaction.choose_recovery(plan)
+    if not interaction.interactive:
+        print("The approval popup failed; no payload was permanently removed.")
+        print("Run the same python ai_cleaner.py purge command in a GUI session.")
+        return EXIT_REVIEW_REQUIRED
     if decision.cancelled or not decision.selected:
         print("Purge cancelled; every payload was retained.")
         return EXIT_CANCELLED
@@ -588,7 +752,11 @@ def _purge(args: argparse.Namespace, interaction: ReviewInteraction) -> int:
         f"Logical payload bytes to remove: {exact.logical_bytes}",
         "Physical disk-space change is not inferred.",
     )
-    if not interaction.confirm_exact("PURGE", exact.digest, summary):
+    confirmed = interaction.confirm_exact("PURGE", exact.digest, summary)
+    if not interaction.interactive:
+        print("The final approval popup failed; no payload was permanently removed.")
+        return EXIT_REVIEW_REQUIRED
+    if not confirmed:
         print("Confirmation did not match; every payload was retained.")
         return EXIT_CANCELLED
     capability = approvals._grant_after_human_review(
@@ -616,13 +784,14 @@ def _task_compat(args: argparse.Namespace) -> int:
 
 def run(argv: Sequence[str] | None = None, *, interaction: ReviewInteraction | None = None) -> int:
     args = build_parser().parse_args(argv)
-    reviewer = ConsoleInteraction() if interaction is None else interaction
+    reviewer = PopupInteraction() if interaction is None else interaction
     try:
         handlers = {
             "scan": lambda: _scan(args),
             "preview": lambda: _preview(args),
             "start": lambda: _start(args),
             "register": lambda: _register(args),
+            "register-temp": lambda: _register_temp(args),
             "protect": lambda: _register(args, protect=True),
             "complete": lambda: _complete(args, reviewer),
             "review": lambda: _review_proposal(_runtime(args.state_dir), args.proposal, reviewer),

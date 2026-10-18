@@ -1,11 +1,25 @@
 # AI-cleaner — Authoritative implementation plan
 
-Version: 1.1 · Created: 17 October 2026 · Revised: 18 October 2026
+Version: 1.2 · Created: 17 October 2026 · Revised: 18 October 2026
 Repository: https://github.com/akshay9192/AI-cleaner.git  
 Owner: Akshay Harwalkar  
-Target: Windows-first, local terminal application with a repository script and cooperative Codex workflow integration.
+Target: Minimal Windows-first Python cleanup script with a lightweight tkinter approval popup.
 
-## 0. Version 1.1 terminal-first design change
+## 0. Scope revisions
+
+### Version 1.2 minimal-popup revision
+
+On 18 October 2026 the owner revised the interaction layer again. The primary entry point is now
+`python ai_cleaner.py ...`; explicit completion opens one compact standard-library tkinter review
+popup. The installed `ai-cleaner` command and earlier repository wrapper remain compatible entry
+points into the same core. A large desktop application, background service, PySide6, installer,
+PyInstaller package, dashboard, and terminal-only approval are not release requirements.
+
+Only files absent from the task baseline, explicitly registered with `register-temp` after they
+exist, unchanged since their identity/content fingerprint was captured, and clear of every hard
+protection may be selected. Other new files are retained as uncertain. If tkinter or a display is
+unavailable, the immutable proposal remains pending and the exact `review` command is printed;
+no terminal or automated approval fallback is provided.
 
 The owner changed the final product design on 18 October 2026. This revision supersedes the
 PySide6 desktop application, GUI-only approval, responsive-widget, DPI, PyInstaller, portable
@@ -18,12 +32,10 @@ approval, same-volume recoverable quarantine, journaling and reconciliation, col
 restore, separately approved purge, truthful byte reporting, local privacy, Windows/NTFS safety,
 adversarial tests, and respectful Git/file handling.
 
-The replacement product is an installable `ai-cleaner` terminal command plus
-`scripts/project_cleanup.py`, both using one application core. Explicit `complete` is the only v1
-task-completion signal. Completion authorises an end snapshot and pending proposal, never file
-mutation. Mutation requires an interactive terminal review that defaults every item to keep and
-confirms the exact digest-bound selection. Non-interactive execution stores the proposal, moves
-nothing, exits with the documented review-required status, and prints the exact review command.
+Version 1.1 introduced the installable command and shared core. Version 1.2 retains that work but
+makes root `ai_cleaner.py` and a tkinter popup the primary experience. Explicit `complete` is the
+only v1 task-completion signal. Completion authorises an end snapshot and pending proposal, never
+file mutation. Missing popup support stores the proposal and moves nothing.
 
 ## 1. How to use this document
 
@@ -57,14 +69,14 @@ No claim is made that the idea is unique or commercially validated. Existing too
 
 ### Required
 
-- Native Windows 11 x64 desktop app, operated as a standard user.
+- Minimal Python 3.12 script with a tkinter approval popup, operated as a standard user.
 - Local NTFS project folders; one selected root per scan/task and one mutation batch at a time.
 - Read-only discovery with explanations and explicit uncertainty.
 - Protected files and folders; user pinning; Git-aware protection when Git is available.
 - Human-reviewed quarantine, recovery, history, and separate permanent purge.
 - Task snapshots and explicit registration of scratch artifacts and deliverables.
-- Read-only CLI and metadata commands suitable for Codex/BMAD integration.
-- Automated tests, Windows-specific tests, documented manual smoke checks, and a Windows portable package.
+- Explicit task commands suitable for Codex/BMAD integration; mutation remains popup-approved.
+- Automated tests, Windows-specific tests, and documented manual smoke checks.
 - Local persistence without accounts, telemetry, API keys, network services, or paid model calls.
 
 ### Excluded from v0.1
@@ -91,24 +103,24 @@ Use these IDs in the tracker, tests, and milestone commits.
 | R03 | Explainable classifications and protected files | M3 |
 | R04 | Baseline/end snapshots and honest task attribution | M4 |
 | R05 | Immutable, exact-item cleanup proposals and stale-state checks | M5 |
-| R06 | Human approval through an exact, default-retain interactive terminal review | M5/M9 |
+| R06 | Human approval through an exact, default-retain tkinter popup | M5/M9 |
 | R07 | Same-volume quarantine with per-file outcomes | M6 |
 | R08 | Crash recovery, collision-safe restore, payload integrity | M7 |
 | R09 | Separate approved permanent purge; no automatic expiry deletion | M8 |
 | R10 | Accurate history, sizes, errors, and recovery status | M7–M9 |
 | R11 | Local privacy, bounded state, versioned configuration | M0/M9 |
 | R12 | Safe CLI and documented Codex/BMAD usage | M4/M10 |
-| R13 | Complete terminal workflow, pending non-interactive review, and both entry points | M9 |
+| R13 | Complete minimal-script/popup workflow and pending headless review | M9 |
 | R14 | Meaningful safety, integration, and adversarial tests | Every gate/M11 |
-| R15 | Reproducible terminal installation, repository script, CI, and clean handoff | M11 |
+| R15 | Reproducible script installation, entry points, CI, and clean handoff | M11 |
 | R16 | Iterative plan compliance and respectful Git/file handling | Every gate |
 
 ## 5. Technology decisions
 
 - Python 3.12 as the initial development and CI baseline. Do not claim other versions are supported until tested.
 - `uv` for environment creation and a committed dependency lockfile; `pyproject.toml` for project metadata and commands.
-- Standard-library `argparse` and terminal I/O for interaction. No browser server, GUI framework,
-  account, API key, or LLM is required.
+- Standard-library `argparse` for commands and `tkinter` for the approval popup. No browser server,
+  third-party GUI framework, account, API key, or LLM is required.
 - Standard-library `sqlite3` for structured local state, with explicit transactions, schema versioning, foreign keys, and migration tests.
 - Dataclasses, enums, pathlib, hashlib, JSON, and argparse where sufficient.
 - A narrow Windows filesystem adapter using documented Win32 facilities, via a carefully scoped binding. Choose ctypes or pywin32 in M1 based on verified handle-based operations; record the choice.
@@ -121,7 +133,7 @@ Do not add an LLM dependency to v0.1. Classification is deterministic; the produ
 
 ## 6. Architecture and file layout
 
-Dependency direction: terminal CLI/script → application services → domain models and
+Dependency direction: root script/CLI and popup → application services → domain models and
 storage/platform adapters. The script is a lightweight wrapper around the same CLI; cleanup logic
 must not be duplicated in it. Terminal handlers must not perform filesystem mutation themselves.
 
@@ -145,7 +157,9 @@ AI-cleaner/
     services/        # scan, classify, task, proposal, recovery, purge
     storage/         # SQLite repositories, migrations, local configuration
     platform/        # Windows identity, boundaries, locks, filesystem operations
-    terminal.py      # TTY-only review and exact confirmation
+    popup.py         # tkinter selection and exact confirmation
+    terminal.py      # shared interaction protocol and test/compatibility adapter
+  ai_cleaner.py      # primary checkout entry point
   scripts/project_cleanup.py
   tests/
     unit/
@@ -167,44 +181,47 @@ Never scan the app's own state/recovery storage as cleanup candidates. Use a dis
 
 ## 7. User experience
 
-Version 1.1 replaces Screens A-D below with a terminal flow. The desktop descriptions are retained
-only as historical context and are superseded. The terminal shows candidates individually with
-path, size, reason, ownership evidence, and protection state; defaults to keep; allows keep,
-protect, or select; then shows the final exact list, count, logical size, recovery destination, and
-proposal digest before explicit confirmation. Results include per-file outcomes and a restore
-command. Restore and purge each require their own exact interactive review.
+Version 1.2 uses one small popup rather than a desktop application or terminal-only approval. It
+shows candidates individually with unchecked checkboxes, paths, sizes and reasons; supports
+keeping/protecting selected files, quarantine, and cancel; then shows a separate exact
+confirmation. Restore and purge use their own popup selection and confirmation.
 
-Both stdin and stdout must be TTYs before production code can mint approval. Piped answers,
-redirected input, EOF, serialized approval, `--yes`, `--force`, completion itself, and agent text
-must never approve mutation. A TTY check is an interaction safeguard, not proof of a human against
-a privileged process controlling the same account.
+Serialized approval, `--yes`, `--force`, completion itself, agent text, and timeout defaults must
+never approve mutation. Closing or cancelling a popup keeps everything. A popup is an intentional
+consent mechanism, not a security boundary against a malicious same-user process.
 
 ### Screen A — Project
 
-Choose a project folder using a native folder dialog. Display the resolved scope and unsupported-root warnings. Offer Scan existing files, Start tracked task, and Recovery history. Do not start by scanning the user's entire home or drive.
+The `start` command receives one explicit root and returns a task ID. It displays actionable
+unsupported-root errors and never scans the user's entire home or drive.
 
 Reject drive roots, the entire user profile, Windows/Program Files directories, and the cleaner's own storage. Allow explicitly selected project directories beneath Documents or Downloads after checking actual path attributes. Do not assume those folders are never cloud-backed.
 
 ### Screen B — Review
 
-Display path, size, category, reason, ownership evidence, modified state, and proposed action. Support search, sorting, group expansion, per-file selection, and pinning. All cleanup checkboxes initially unchecked. Protected or unsupported items cannot be selected.
+Display each eligible relative path, size, and plain-language reason in one compact scrollable
+popup. All cleanup checkboxes are initially unchecked. Buttons keep/protect the checked files,
+move checked files to quarantine, or cancel. Protected and uncertain items are not selectable.
 
 Categories:
 - Protected: pinned, deliverable, required input, sensitive/configuration, source, Git-tracked, or active-task file.
-- Suggested intermediate: a recognized disposable-looking artifact, still requiring review.
-- Registered task scratch: explicitly registered as intermediate; declaration is not independent proof of origin.
+- Registered task temporary: absent from the baseline, explicitly registered after creation, and
+  still matching its captured handle identity and content fingerprint.
 - Unknown: insufficient evidence; no default cleanup recommendation.
 - Unsupported: unsafe/unimplemented filesystem semantics; explanatory only.
 
-Show bounded plain-text previews only after explicit user selection, with binary/large-file limits. Do not execute scripts, render active HTML, open macros, or follow instructions embedded in scanned files. External opening, if offered, must be a separate explicit OS action.
+Do not execute or render candidate content. File contents are hashed only for identity binding.
 
 ### Screen C — Confirm
 
-Show the exact selected item list, count, logical size, recovery destination, and statement that quarantine does not free disk space. Buttons: Cancel and Move selected files to recovery. Never preselect confirmation.
+Show the exact selected item list, count, logical size, recovery destination, digest, and statement
+that quarantine does not free disk space. Buttons: Cancel and approve the exact operation.
 
 ### Screen D — Results and recovery
 
-Show successes, skipped items, errors, retained bytes, and restore options. Restore requires user action. A collision leaves both files intact and offers an explicit alternate destination/name. Permanent removal has a separate review with irreversible-action wording and its own confirmation.
+Print per-file results and the restore command. Restore requires a popup action. A collision leaves
+both files intact and accepts only an explicitly reviewed alternate destination. Permanent removal
+has a separate popup with irreversible-action wording and its own confirmation.
 
 Retention age is a review reminder only. Never auto-purge. Do not silently empty the Windows Recycle Bin or describe private recovery storage as the system Recycle Bin.
 
@@ -214,7 +231,10 @@ Protection takes priority over classification. Protect .git and other VCS metada
 
 For Git roots, obtain tracked paths through a read-only, argument-array Git command with NUL-separated output. Git errors must not silently become “nothing is tracked.” Fall back to conservative protection and clearly show unavailable Git evidence. Never treat ignored or untracked status as deletion permission.
 
-Existing-clutter candidates may include recognized Python bytecode caches, test cache contents, LaTeX compilation intermediates, and declared rendering previews. These are candidate rules only. Never broadly classify every .log, .png, .pdf, .md, .py, build directory, or file named draft as junk. A known directory name is not ownership proof.
+Without a task baseline and fingerprinted registration, existing clutter is retained as unknown.
+Recognized cache names may explain a file but cannot make it selectable in this minimal release.
+Never broadly classify every `.log`, image, document, source file, build directory, or file named
+draft as disposable. A known directory name is not ownership proof.
 
 Delete no directories recursively in v0.1. Enumerate and review individual regular files. Directory rows are UI groups of frozen child items, not permission to include future children. Leave empty directories in place; optional empty-directory removal is deferred.
 
@@ -241,7 +261,7 @@ Minimum records:
 
 Proposal states: draft → reviewable → human-approved → executing → complete/partial. Changed selection or file state invalidates approval. Cancelled, expired, or reused approvals cannot execute. Set approval expiry to 10 minutes after confirmation; expiry before execution requires another confirmation.
 
-Approval is an in-process capability created only after the real interactive terminal confirmation
+Approval is an in-process capability created only after the real popup selection and confirmation
 and bound to the exact proposal digest. It is single-use and is not loaded from a JSON `approved`
 field or persisted for unattended reuse. History may record approval occurred, but history is not
 a reusable execution credential. Non-interactive commands cannot mint execution approval.
@@ -284,19 +304,16 @@ Report logical payload bytes removed, and optionally measured free-space change 
 
 Use a cooperative wrapper workflow, not undocumented parsing of Codex's private storage.
 
-Version 1.1 canonical commands are:
+Version 1.2 canonical commands are:
 
 ```powershell
-ai-cleaner start --root . --label "Implement feature"
-ai-cleaner register --root . --path "scratch\preview.aux" --role scratch
-ai-cleaner protect --root . --path "dist\final-output.zip"
-ai-cleaner complete --root .
-ai-cleaner review --proposal PROPOSAL_ID
-ai-cleaner preview --root .
-ai-cleaner history --root .
-ai-cleaner restore --run RUN_ID
-ai-cleaner purge --run RUN_ID
-python scripts/project_cleanup.py --help
+python ai_cleaner.py start --root . --label "Implement feature"
+python ai_cleaner.py register-temp --task TASK_ID --path "scratch\preview.aux"
+python ai_cleaner.py protect --task TASK_ID --path "dist\final-output.zip"
+python ai_cleaner.py complete --task TASK_ID
+python ai_cleaner.py review --proposal PROPOSAL_ID
+python ai_cleaner.py restore --run RUN_ID
+python ai_cleaner.py purge --run RUN_ID
 ```
 
 `complete` records the end state and prepares a proposal. With exactly one unresolved task for the
@@ -304,7 +321,7 @@ root it resolves that task and displays its ID and label; ambiguity requires `--
 baseline, `preview` may conservatively show existing clutter but must state that historical
 ownership is unknown. Added files are “observed during task,” never claimed as AI-created.
 
-Interactive review defaults every candidate to keep. Selection changes produce a new exact digest;
+Popup review defaults every candidate to keep. Selection changes produce a new exact digest;
 file, identity, policy, expiry, or replay changes require fresh review. Non-interactive completion
 stores a pending proposal, performs no mutation, exits 6, and prints `ai-cleaner review --proposal
 PROPOSAL_ID`. Exit 7 means user cancellation/no selection and exit 8 means an operation completed
@@ -321,7 +338,10 @@ report an incomplete scan as full success.
 
 Task start stores a baseline inventory and a protected pre-existing set for task-specific cleanup. Task finish records added/modified/missing files; it never deletes anything. Pre-existing modified files remain protected in task mode. Another editor may create files during the same task, so the label must be “observed during task,” not “created by Codex,” without additional reliable evidence.
 
-Registration validates scope and conflicts but treats an agent declaration as a declaration. Deliverables and inputs become protected. Registration as scratch must not override hard protections or make a file automatically eligible for deletion.
+`register-temp` validates scope, rejects baseline files, and captures handle identity plus a content
+hash after the file exists. A later change makes it ineligible until re-registered. Protection
+always wins; source-like files remain protected even when registered. Deliverables, protected
+directories, and all descendants become protected.
 
 An active or interrupted task protects its declared scratch and observed changing files. For v0.1, allow only one active tracked task per root. The user must explicitly finish or resolve an abandoned task before proposing its cleanup. Snapshot tracking must exclude app state, recovery storage, dependency trees, VCS internals, and unsupported paths to avoid unnecessary overhead.
 
@@ -394,15 +414,16 @@ Dependencies: M7. Requirements: R09, R10.
 - T8.3 Test altered payloads, replay, interrupted purge, and retention reminders.
 Gate: no purge without its own approval; only selected app-owned payloads affected; age never triggers deletion; logical and physical-byte claims separated.
 
-### M9 — Complete terminal experience (revised 18 October 2026)
+### M9 — Complete minimal popup experience (revised 18 October 2026)
 Dependencies: M2–M8. Requirements: R06, R10, R11, R13.
-- T9.1 Build project selection and scan worker/progress/cancel behavior.
-- T9.2 Build sortable review table, explanations, pins, selection and bounded preview.
-- T9.3 Connect real confirmation, quarantine outcomes, history, restore and purge.
-- T9.4 Check keyboard navigation, readable contrast, 100–150% Windows scaling, long paths, empty and error states.
-Gate: real disposable fixture workflow works through terminal orchestration; candidates default to
-keep; non-TTY runs leave reviewable proposals without mutation; exact TTY approval is digest-bound;
-both installed and repository-script entry points work. The earlier desktop tasks are superseded.
+- T9.1 Provide the root script and explicit start/register-temp/protect/complete commands.
+- T9.2 Build the compact unchecked checkbox review, keep/protect action, and no-candidate message.
+- T9.3 Connect separate exact confirmation, quarantine outcomes, restore, and purge popups.
+- T9.4 Fail closed when tkinter/display/popup construction is unavailable or closes unexpectedly.
+Gate: real disposable fixture workflow works through popup orchestration; candidates default to
+keep; unavailable GUI sessions leave reviewable proposals without mutation; approval is
+digest-bound; the root script and installed command work. Earlier large-desktop tasks are
+superseded.
 
 ### M10 — Integration and project documentation
 Dependencies: M9. Requirements: R12, R15, R16.
@@ -411,13 +432,13 @@ Dependencies: M9. Requirements: R12, R15, R16.
 - T10.3 Verify clean setup and documented task workflow against disposable examples.
 Gate: a new user can run from documentation; no requirement for an API key, cloud account, or BMAD at application runtime; no undocumented CLI mutations.
 
-### M11 — Native validation and terminal handoff (revised 18 October 2026)
+### M11 — Native validation and script handoff (revised 18 October 2026)
 Dependencies: M10. Requirements: R14, R15, R16.
-- T11.1 Add Windows CI for lint, typing, core/integration/native tests, and UI tests where supported.
-- T11.2 Build a Windows one-directory package and launch it outside the source checkout.
+- T11.1 Add Windows CI for lint, typing, core/integration/native tests, and popup logic tests.
+- T11.2 Smoke-test the root script, installed command, and missing-popup pending path.
 - T11.3 Execute the complete acceptance matrix, record platform/versions/results, and remove owned disposable development artifacts.
 - T11.4 Audit every R ID and plan section against delivered behavior; fix gaps.
-Gate: all required core/native/terminal tests and both entry-point smoke checks pass on Windows, or
+Gate: all required core/native/workflow tests and entry-point smoke checks pass on Windows, or
 report a specifically incomplete release. Desktop packaging is not required. No claim of full
 completion based only on mocked/non-Windows tests. Do not publish or push without authorisation.
 
@@ -448,9 +469,9 @@ Tests must use disposable fixtures with unique test roots and app-state director
 | Concurrency | Second conflicting operation rejected; journal and payloads consistent |
 | User strings | Spaces, Unicode, quotes and shell metacharacters are data, never commands |
 | Privacy | No unexpected network calls, telemetry, secret-content previews or uploads |
-| Terminal entry points | Installed command and repository script complete the documented fixture journey |
-| Non-interactive review | Pending proposal stored; no mutation; exit 6 and exact review command shown |
-| Terminal decisions | Keep/select/protect/cancel default safely and exact confirmation binds the digest |
+| Script entry points | Root script and installed command use the same implementation |
+| Missing popup | Pending proposal stored; no mutation; exit 6 and exact review command shown |
+| Popup decisions | Unchecked/select/protect/cancel default safely and exact confirmation binds the digest |
 
 Use unit tests for policy/state machines, real filesystem integration tests for operations, native Windows tests for OS behavior, and UI tests for confirmation/cancellation. Avoid tests that merely repeat implementation logic.
 
@@ -476,25 +497,28 @@ Owner intends to place this plan locally and push it. This document does not its
 
 Maintain one disposable development-artifact directory when needed. Fixture cleanup must target only paths created and recorded by the current test/task, with no link traversal. Remove owned temporary scripts, sample outputs, intermediate build scratch, and temporary validation images once no longer required.
 
-Do not delete pre-existing files or classify all new/untracked files as temporary. Preserve source, tests, manifests, uv.lock, required configuration, this plan, tracker, docs, and the final requested portable package. The virtual environment is reusable development state, not automatically garbage. User recovery payloads must never be removed as development cleanup.
+Do not delete pre-existing files or classify all new/untracked files as temporary. Preserve source,
+tests, manifests, uv.lock, required configuration, this plan, tracker, docs, and the root script.
+The virtual environment is reusable development state, not automatically garbage. User recovery
+payloads must never be removed as development cleanup.
 
 Use targeted .gitignore entries for environment, app/test state, logs, cache, build outputs and transient files. Do not ignore all Markdown, images, or data indiscriminately.
 
 Final repository deliverables:
-- Complete source and functioning terminal tool with one shared core.
+- Complete source and functioning minimal script/popup tool with one shared core.
 - Tests and Windows CI definition.
 - pyproject.toml and locked dependencies.
 - README, SAFETY.md, CODEX_WORKFLOW.md, concise VALIDATION.md.
 - This plan and completed evidence tracker.
-- Lightweight repository script and reproducible installable terminal command.
+- Root `ai_cleaner.py` script and compatible installable command.
 
 ## 16. Definition of done
 
 All R01–R16 and M0–M11 revised gates satisfied for the supported Windows scope. No required TODOs,
 fake results, approval bypasses, unreviewed dangerous fallbacks, or silent exceptions. The real
-terminal tool supports task start, registration/protection, explicit completion, pending preview,
-default-retain review, exact approval, quarantine, restore, history, and separately approved purge.
-Native safety tests and both terminal entry points have actual evidence. Desktop UI and PyInstaller
+tool supports task start, fingerprinted temp registration/protection, explicit completion, pending
+review, exact popup approval, quarantine, restore, history, and separately approved purge. Native
+safety tests and both script/package entry points have actual evidence. PySide6 and PyInstaller
 results are superseded historical evidence, not release gates.
 
 Report exact setup/launch/test commands and package location. Distinguish verified, implemented-but-unverified, and blocked work. Report branch/commits and whether anything was pushed. State native platform gaps if any. Do not call an unverified build production-ready or guarantee zero data loss.

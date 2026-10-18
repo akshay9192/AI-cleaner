@@ -29,7 +29,7 @@ def test_migration_is_versioned_and_repeatable(tmp_path: Path) -> None:
                 "SELECT name FROM sqlite_master WHERE type = 'table'"
             ).fetchall()
         }
-    assert {"projects", "scans", "observations", "recovery_items"} <= tables
+    assert {"projects", "scans", "observations", "recovery_items", "task_temp_files"} <= tables
 
 
 def test_newer_database_is_rejected(tmp_path: Path) -> None:
@@ -62,7 +62,7 @@ def test_version_one_database_migrates_operation_project_link(tmp_path: Path) ->
             row[1] for row in connection.execute("PRAGMA table_info(operation_runs)")
         }
         assert connection.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
-    assert "project_id" in columns
+    assert {"project_id", "proposal_id", "task_id", "approved_at"} <= columns
 
 
 def test_scan_is_read_only_and_excludes_protected_trees(tmp_path: Path) -> None:

@@ -31,4 +31,5 @@ jobs:
       - name: Smoke test terminal entry points
         run: |
           uv run ai-cleaner --help
+          uv run python ai_cleaner.py --help
           uv run python scripts/project_cleanup.py --help

@@ -115,6 +115,26 @@ def test_approval_is_bound_to_project_and_root_metadata(tmp_path: Path) -> None:
     assert (app.root / "bound.aux").read_bytes() == b"bound"
 
 
+def test_file_protected_after_proposal_is_not_moved(tmp_path: Path) -> None:
+    app = FixtureApp(tmp_path)
+    proposal = app.proposal({"protect-later.aux": b"keep"})
+    app.database.add_protection(
+        protection_id="late-protection",
+        project_id=app.project_id,
+        relative_path="protect-later.aux",
+        reason="final deliverable",
+        origin="test",
+        created_at="2026-10-18T00:00:00+00:00",
+    )
+
+    with pytest.raises(RuntimeError, match="became protected"):
+        app.quarantine().execute(
+            proposal, app.approve(proposal.items_digest, "quarantine")
+        )
+
+    assert (app.root / "protect-later.aux").read_bytes() == b"keep"
+
+
 def test_exact_approved_files_move_and_report_quarantine_not_reclamation(
     tmp_path: Path,
 ) -> None:
