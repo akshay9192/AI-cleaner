@@ -18,7 +18,15 @@ From this checkout:
 ```powershell
 py -3.12 -m venv .venv
 & ".\.venv\Scripts\Activate.ps1"
-python -m pip install -e .
+python -m pip install .
+ai-cleaner doctor
+```
+
+For source development, use `python -m pip install -e .` instead. A normal installation provides
+the `ai-cleaner` command from other directories. The root script imports the package from this
+checkout; it is an entry point, not a portable standalone script:
+
+```powershell
 python ai_cleaner.py doctor
 ```
 
@@ -91,3 +99,6 @@ the user enabled that convention); and never approve the popup for the user.
 
 See `docs/SAFETY.md`, `docs/VALIDATION.md`, and `IMPLEMENTATION_STATUS.md` for the supported boundary
 and current blocked native checks.
+
+For the isolated, synthetic popup journey and the few clicks that must be performed by a human,
+follow `docs/NATIVE_ACCEPTANCE.md`.

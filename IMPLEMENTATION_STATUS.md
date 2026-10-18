@@ -19,10 +19,10 @@ Statuses are evidence-based: **pending**, **in progress**, **verified**, **block
 | R09 Separately reviewed permanent purge | `services/purge.py` | Current disposable managed-boundary separate approval, stale payload, replay, and interruption tests | verified |
 | R10 Truthful history and byte reporting | CLI and storage | Terminal workflow verifies run/recovery IDs and quarantined versus reclaimed reporting | verified |
 | R11 Local, versioned state without account/API/network runtime | package/storage/config | Runtime dependency set is empty; schema and local-state tests pass | verified |
-| R12 Practical root script and installed command | `ai_cleaner.py`, compatibility entry points | Root script and installed command report version/help and load one shared implementation | verified |
+| R12 Practical root script and installed command | `ai_cleaner.py`, compatibility entry points | Clean wheel install succeeded; installed command and package import work from a separate synthetic project directory | verified |
 | R13 Minimal popup completion workflow | `popup.py`, `cli.py` | Popup availability/failure path and complete/review orchestration implemented; human production mutation intentionally not automated | in progress |
-| R14 Acceptance suite | `tests/unit`, `tests/integration`, `tests/terminal`, `tests/windows` | 58 managed-boundary tests pass; native full run has 27 passes and 36 boundary-blocked failures | in progress |
-| R15 Reproducible installation and lock | `pyproject.toml`, `uv.lock`, README, CI | Normal editable pip install and entry points pass; `uv sync --frozen` cannot run in this session | in progress |
+| R14 Acceptance suite | `tests/unit`, `tests/integration`, `tests/terminal`, `tests/windows` | 58 managed-boundary tests pass; current unmodified full run has 29 passes and 37 boundary-blocked failures; human popup journey is prepared | in progress |
+| R15 Reproducible installation and lock | `pyproject.toml`, `uv.lock`, README, CI | Clean non-editable wheel install passes; root lock metadata matches, but stale unreachable records and `uv` frozen verification remain blocked | in progress |
 | R16 Traceability and Git hygiene | plan, validation record, tracker, local commits | Final diff review passed; focused implementation and documentation commits created locally | verified |
 
 ## Milestone gates
@@ -34,12 +34,12 @@ Statuses are evidence-based: **pending**, **in progress**, **verified**, **block
 | M6–M8 | Quarantine, recovery/history, purge | Disposable managed-boundary service and workflow tests pass | verified |
 | M9 | Minimal popup workflow | Root script, popup adapter and headless fallback implemented; test-adapter journey passes | in progress |
 | M10 | Documentation | Plan, README, Codex workflow, safety and validation updated for popup/script product | verified |
-| M11 | CI, installation and final audit | Terminal CI and editable install implemented; final checks pass and local commits are recorded; uv frozen check remains blocked | in progress |
+| M11 | CI, installation and final audit | Clean install and external-directory entry-point checks pass; synthetic native fixture is ready; human popup, native suite, and uv frozen checks remain pending/blocked | in progress |
 
 ## Superseded and blocked evidence
 
 - PySide6 desktop screens, Qt responsiveness/DPI, and PyInstaller onedir are no longer release requirements. Their nine historical Qt tests and old package smoke are **superseded**, not current passes.
-- On 18 October 2026 the current 63-test native run reached 27 passes and 36 failures; all 36 stopped at the same managed `CreateFileW` denial on the user-profile ancestor before the affected behavior ran. They remain environment-blocked, not passing evidence.
+- On 18 October 2026 the current 66-test native run reached 29 passes and 37 failures; all 37 stopped at the same managed `CreateFileW` denial on the user-profile ancestor before the affected behavior ran. They remain environment-blocked, not passing evidence.
 - The managed-boundary test configuration replaces only the unavailable ancestor reparse-chain call. It still exercises hashing, guarded moves, journaling, restore, and deletion on disposable fixtures. It does not validate the patched boundary itself.
-- The root dependency metadata in `uv.lock` was adjusted for the removed desktop dependencies, but the unavailable `uv.exe` prevents regenerating or frozen-validating that lock in this session.
-- Local implementation commit: `ba2db6a` (`feat: replace desktop flow with safe terminal workflow`). The plan, documentation, validation evidence, and tracker are recorded in the following focused documentation commit.
+- The root dependency metadata in `uv.lock` matches `pyproject.toml`, but unreachable desktop-era records remain. The unavailable `uv.exe` prevents clean regeneration or frozen validation in this session.
+- Acceptance work continues from pushed implementation commit `cc081d3`; no release or merge is claimed.

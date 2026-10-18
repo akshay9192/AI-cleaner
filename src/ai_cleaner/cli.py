@@ -409,8 +409,12 @@ def _prepare_pending(
 
 def _review_required(proposal_id: str) -> int:
     print("The approval popup could not be displayed; no files were moved.")
-    print(f"Review later with: python ai_cleaner.py review --proposal {proposal_id}")
+    _print_review_command(proposal_id)
     return EXIT_REVIEW_REQUIRED
+
+
+def _print_review_command(proposal_id: str) -> None:
+    print(f"Review later with: python ai_cleaner.py review --proposal {proposal_id}")
 
 
 def _review_proposal(runtime: Runtime, proposal_id: str, interaction: ReviewInteraction) -> int:
@@ -435,6 +439,7 @@ def _review_proposal(runtime: Runtime, proposal_id: str, interaction: ReviewInte
         )
     if decision.cancelled or not decision.selected:
         print("Review cancelled or no files selected; every file was retained.")
+        _print_review_command(proposal_id)
         return EXIT_CANCELLED
     exact = runtime.proposals.select_subset(proposal, set(decision.selected))
     summary = (
@@ -453,6 +458,7 @@ def _review_proposal(runtime: Runtime, proposal_id: str, interaction: ReviewInte
         return _review_required(exact.proposal_id)
     if not confirmed:
         print("Confirmation did not match; every file was retained.")
+        _print_review_command(exact.proposal_id)
         return EXIT_CANCELLED
     approvals = ApprovalBroker()
     capability = approvals._grant_after_human_review(

@@ -10,6 +10,7 @@ build/
 dist/
 *.spec.tmp
 .ai-cleaner-test-artifacts/
+.ai-cleaner-acceptance/
 .ai-cleaner-state/
 *.db-shm
 *.db-wal

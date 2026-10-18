@@ -18,6 +18,10 @@ unregistered outputs, maintainable source, and final deliverables remain protect
 AI-cleaner does not listen for arbitrary natural-language completion, parse private agent logs,
 watch terminal input, infer completion from Git, or run a background monitor.
 
+For native acceptance only, `scripts/prepare_acceptance_fixture.py` creates an ignored synthetic
+project with a repository-local `AGENTS.md` containing the same rules. It does not modify global
+Codex or other agent configuration. See `docs/NATIVE_ACCEPTANCE.md` for the exact journey.
+
 BMAD is a development workflow, not a runtime dependency. Its renderer remained unavailable in
 the 18 October 2026 managed session because the resolved WinGet `uv.exe` could not be accessed. It
 was not rerun or bypassed, and no BMAD check is claimed.

@@ -194,7 +194,8 @@ def test_default_keep_cancel_protect_and_noninteractive_review_are_safe(
         ),
     ) == EXIT_CANCELLED
     assert candidate.exists()
-    capsys.readouterr()
+    cancelled_output = capsys.readouterr().out
+    assert f"review --proposal {proposal_id}" in cancelled_output
 
     decision = CleanupDecision(frozenset(), frozenset({"preview.tmp"}))
     assert run(
