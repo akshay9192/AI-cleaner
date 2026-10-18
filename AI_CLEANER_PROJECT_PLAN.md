@@ -1,9 +1,29 @@
 # AI-cleaner — Authoritative implementation plan
 
-Version: 1.0 · Created: 17 October 2026  
+Version: 1.1 · Created: 17 October 2026 · Revised: 18 October 2026
 Repository: https://github.com/akshay9192/AI-cleaner.git  
 Owner: Akshay Harwalkar  
-Target: Windows-first, local desktop application, with a read-only CLI and cooperative Codex workflow integration.
+Target: Windows-first, local terminal application with a repository script and cooperative Codex workflow integration.
+
+## 0. Version 1.1 terminal-first design change
+
+The owner changed the final product design on 18 October 2026. This revision supersedes the
+PySide6 desktop application, GUI-only approval, responsive-widget, DPI, PyInstaller, portable
+desktop executable, and desktop-screen requirements. Those implementations and results remain
+historical evidence only; they are not v1.1 release gates.
+
+Unchanged requirements are explicit selected roots, bounded read-only scanning, conservative
+protection and uncertainty, honest task snapshots, immutable exact-file proposals, fresh human
+approval, same-volume recoverable quarantine, journaling and reconciliation, collision-safe
+restore, separately approved purge, truthful byte reporting, local privacy, Windows/NTFS safety,
+adversarial tests, and respectful Git/file handling.
+
+The replacement product is an installable `ai-cleaner` terminal command plus
+`scripts/project_cleanup.py`, both using one application core. Explicit `complete` is the only v1
+task-completion signal. Completion authorises an end snapshot and pending proposal, never file
+mutation. Mutation requires an interactive terminal review that defaults every item to keep and
+confirms the exact digest-bound selection. Non-interactive execution stores the proposal, moves
+nothing, exits with the documented review-required status, and prints the exact review command.
 
 ## 1. How to use this document
 
@@ -71,28 +91,29 @@ Use these IDs in the tracker, tests, and milestone commits.
 | R03 | Explainable classifications and protected files | M3 |
 | R04 | Baseline/end snapshots and honest task attribution | M4 |
 | R05 | Immutable, exact-item cleanup proposals and stale-state checks | M5 |
-| R06 | Human approval through the desktop review flow | M5/M9 |
+| R06 | Human approval through an exact, default-retain interactive terminal review | M5/M9 |
 | R07 | Same-volume quarantine with per-file outcomes | M6 |
 | R08 | Crash recovery, collision-safe restore, payload integrity | M7 |
 | R09 | Separate approved permanent purge; no automatic expiry deletion | M8 |
 | R10 | Accurate history, sizes, errors, and recovery status | M7–M9 |
 | R11 | Local privacy, bounded state, versioned configuration | M0/M9 |
 | R12 | Safe CLI and documented Codex/BMAD usage | M4/M10 |
-| R13 | Native Windows desktop workflow and responsive scanning | M9 |
+| R13 | Complete terminal workflow, pending non-interactive review, and both entry points | M9 |
 | R14 | Meaningful safety, integration, and adversarial tests | Every gate/M11 |
-| R15 | Reproducible setup, Windows package, and clean handoff | M11 |
+| R15 | Reproducible terminal installation, repository script, CI, and clean handoff | M11 |
 | R16 | Iterative plan compliance and respectful Git/file handling | Every gate |
 
 ## 5. Technology decisions
 
 - Python 3.12 as the initial development and CI baseline. Do not claim other versions are supported until tested.
 - `uv` for environment creation and a committed dependency lockfile; `pyproject.toml` for project metadata and commands.
-- PySide6 / Qt Widgets for the native desktop interface. No browser server or Electron layer.
+- Standard-library `argparse` and terminal I/O for interaction. No browser server, GUI framework,
+  account, API key, or LLM is required.
 - Standard-library `sqlite3` for structured local state, with explicit transactions, schema versioning, foreign keys, and migration tests.
 - Dataclasses, enums, pathlib, hashlib, JSON, and argparse where sufficient.
 - A narrow Windows filesystem adapter using documented Win32 facilities, via a carefully scoped binding. Choose ctypes or pywin32 in M1 based on verified handle-based operations; record the choice.
-- pytest, pytest-qt, Ruff, and a type checker for core/services/platform interfaces. Tests must use real fixtures as well as targeted mocks.
-- PyInstaller one-directory Windows distribution initially; build it on Windows. Keep package generation reproducible and separate from application execution.
+- pytest, Ruff, and a type checker for core/services/platform interfaces. Tests must use real
+  fixtures as well as targeted mocks.
 
 Resolve compatible current dependency versions during M0 and lock them. Do not invent package versions. Preserve the repository LICENSE and record third-party notices and distribution obligations before packaging. A repository license does not automatically cover its dependencies.
 
@@ -100,7 +121,9 @@ Do not add an LLM dependency to v0.1. Classification is deterministic; the produ
 
 ## 6. Architecture and file layout
 
-Dependency direction: UI/CLI → application services → domain models and storage/platform adapters. Core policy and proposal logic must not import PySide6. UI handlers must not perform filesystem mutation themselves.
+Dependency direction: terminal CLI/script → application services → domain models and
+storage/platform adapters. The script is a lightweight wrapper around the same CLI; cleanup logic
+must not be duplicated in it. Terminal handlers must not perform filesystem mutation themselves.
 
 Suggested layout; keep responsibilities stable even if small modules are combined:
 
@@ -122,17 +145,17 @@ AI-cleaner/
     services/        # scan, classify, task, proposal, recovery, purge
     storage/         # SQLite repositories, migrations, local configuration
     platform/        # Windows identity, boundaries, locks, filesystem operations
-    ui/              # windows, models, dialogs, worker coordination
+    terminal.py      # TTY-only review and exact confirmation
+  scripts/project_cleanup.py
   tests/
     unit/
     integration/
     windows/
-    ui/
+    terminal/
   docs/
     SAFETY.md
     CODEX_WORKFLOW.md
     VALIDATION.md
-  packaging/
   .github/workflows/ci.yml
 ```
 
@@ -143,6 +166,18 @@ Application state: `%LOCALAPPDATA%\AI-cleaner\` for state DB, logs, and configur
 Never scan the app's own state/recovery storage as cleanup candidates. Use a distinct test state directory for tests. Bounded logs must not contain file contents, credentials, or full agent conversations.
 
 ## 7. User experience
+
+Version 1.1 replaces Screens A-D below with a terminal flow. The desktop descriptions are retained
+only as historical context and are superseded. The terminal shows candidates individually with
+path, size, reason, ownership evidence, and protection state; defaults to keep; allows keep,
+protect, or select; then shows the final exact list, count, logical size, recovery destination, and
+proposal digest before explicit confirmation. Results include per-file outcomes and a restore
+command. Restore and purge each require their own exact interactive review.
+
+Both stdin and stdout must be TTYs before production code can mint approval. Piped answers,
+redirected input, EOF, serialized approval, `--yes`, `--force`, completion itself, and agent text
+must never approve mutation. A TTY check is an interaction safeguard, not proof of a human against
+a privileged process controlling the same account.
 
 ### Screen A — Project
 
@@ -206,7 +241,10 @@ Minimum records:
 
 Proposal states: draft → reviewable → human-approved → executing → complete/partial. Changed selection or file state invalidates approval. Cancelled, expired, or reused approvals cannot execute. Set approval expiry to 10 minutes after confirmation; expiry before execution requires another confirmation.
 
-Approval is an in-process capability created by the real UI interaction and bound to the exact proposal digest. It is single-use and is not loaded from a JSON `approved` field or persisted for unattended reuse. History may record approval occurred, but history is not a reusable execution credential. CLI commands cannot mint execution approval.
+Approval is an in-process capability created only after the real interactive terminal confirmation
+and bound to the exact proposal digest. It is single-use and is not loaded from a JSON `approved`
+field or persisted for unattended reuse. History may record approval occurred, but history is not
+a reusable execution credential. Non-interactive commands cannot mint execution approval.
 
 This prevents accidental automated approval through supported interfaces; it is not a security boundary against malware or an agent with unrestricted control of the same OS account, UI, or application code. State that limit in SAFETY.md.
 
@@ -246,21 +284,38 @@ Report logical payload bytes removed, and optionally measured free-space change 
 
 Use a cooperative wrapper workflow, not undocumented parsing of Codex's private storage.
 
-Proposed commands to implement (these are product requirements, not existing commands):
+Version 1.1 canonical commands are:
 
 ```powershell
-uv run ai-cleaner doctor
-uv run ai-cleaner scan --root "C:\Projects\Example" --json
-uv run ai-cleaner task start --root "C:\Projects\Example" --label "Report revision"
-uv run ai-cleaner task register --task TASK_ID --path "scratch\preview.png" --role scratch
-uv run ai-cleaner task register --task TASK_ID --path "final\report.pdf" --role deliverable
-uv run ai-cleaner task finish --task TASK_ID
-uv run ai-cleaner propose --root "C:\Projects\Example" --task TASK_ID
-uv run ai-cleaner history --root "C:\Projects\Example" --json
-uv run ai-cleaner gui --root "C:\Projects\Example"
+ai-cleaner start --root . --label "Implement feature"
+ai-cleaner register --root . --path "scratch\preview.aux" --role scratch
+ai-cleaner protect --root . --path "dist\final-output.zip"
+ai-cleaner complete --root .
+ai-cleaner review --proposal PROPOSAL_ID
+ai-cleaner preview --root .
+ai-cleaner history --root .
+ai-cleaner restore --run RUN_ID
+ai-cleaner purge --run RUN_ID
+python scripts/project_cleanup.py --help
 ```
 
-Output valid structured JSON without progress noise on stdout when --json is supplied; send diagnostics to stderr. Return 0 for success, 2 for invalid input, 3 for unsupported scope, 4 for partial/incomplete results, 5 for state/lock conflicts, and 1 for other failures. Never report an incomplete scan as full success.
+`complete` records the end state and prepares a proposal. With exactly one unresolved task for the
+root it resolves that task and displays its ID and label; ambiguity requires `--task`. Without a
+baseline, `preview` may conservatively show existing clutter but must state that historical
+ownership is unknown. Added files are “observed during task,” never claimed as AI-created.
+
+Interactive review defaults every candidate to keep. Selection changes produce a new exact digest;
+file, identity, policy, expiry, or replay changes require fresh review. Non-interactive completion
+stores a pending proposal, performs no mutation, exits 6, and prints `ai-cleaner review --proposal
+PROPOSAL_ID`. Exit 7 means user cancellation/no selection and exit 8 means an operation completed
+partially. No production confirmation bypass is permitted. The nested `task` commands may remain
+as compatibility aliases, but the commands above are the documented workflow.
+
+Output one valid structured JSON document without progress noise on stdout when `--json` is
+supplied; send diagnostics to stderr. Return 0 for success, 1 for other errors, 2 for invalid
+input, 3 for unsupported scope, 4 for incomplete scans, 5 for state/lock conflicts, 6 when human
+review is required, 7 for cancellation/no selection, and 8 for partial mutation results. Never
+report an incomplete scan as full success.
 
 `scan` and `propose` may write their own app-state records but never mutate inspected user files. Metadata commands may create app state and task records only. No `clean --yes`, `purge --yes`, or CLI approval token minting.
 
@@ -339,13 +394,15 @@ Dependencies: M7. Requirements: R09, R10.
 - T8.3 Test altered payloads, replay, interrupted purge, and retention reminders.
 Gate: no purge without its own approval; only selected app-owned payloads affected; age never triggers deletion; logical and physical-byte claims separated.
 
-### M9 — Complete desktop experience
+### M9 — Complete terminal experience (revised 18 October 2026)
 Dependencies: M2–M8. Requirements: R06, R10, R11, R13.
 - T9.1 Build project selection and scan worker/progress/cancel behavior.
 - T9.2 Build sortable review table, explanations, pins, selection and bounded preview.
 - T9.3 Connect real confirmation, quarantine outcomes, history, restore and purge.
 - T9.4 Check keyboard navigation, readable contrast, 100–150% Windows scaling, long paths, empty and error states.
-Gate: real end-to-end fixture workflow works through the UI; no placeholders; no blocked event loop during scanning; selections are unchecked initially; errors actionable.
+Gate: real disposable fixture workflow works through terminal orchestration; candidates default to
+keep; non-TTY runs leave reviewable proposals without mutation; exact TTY approval is digest-bound;
+both installed and repository-script entry points work. The earlier desktop tasks are superseded.
 
 ### M10 — Integration and project documentation
 Dependencies: M9. Requirements: R12, R15, R16.
@@ -354,13 +411,15 @@ Dependencies: M9. Requirements: R12, R15, R16.
 - T10.3 Verify clean setup and documented task workflow against disposable examples.
 Gate: a new user can run from documentation; no requirement for an API key, cloud account, or BMAD at application runtime; no undocumented CLI mutations.
 
-### M11 — Native validation and packaging
+### M11 — Native validation and terminal handoff (revised 18 October 2026)
 Dependencies: M10. Requirements: R14, R15, R16.
 - T11.1 Add Windows CI for lint, typing, core/integration/native tests, and UI tests where supported.
 - T11.2 Build a Windows one-directory package and launch it outside the source checkout.
 - T11.3 Execute the complete acceptance matrix, record platform/versions/results, and remove owned disposable development artifacts.
 - T11.4 Audit every R ID and plan section against delivered behavior; fix gaps.
-Gate: all required tests and package smoke checks pass on Windows, or report a specifically incomplete release. No claim of full completion based only on mocked/non-Windows tests. Do not publish the build or push without authorisation.
+Gate: all required core/native/terminal tests and both entry-point smoke checks pass on Windows, or
+report a specifically incomplete release. Desktop packaging is not required. No claim of full
+completion based only on mocked/non-Windows tests. Do not publish or push without authorisation.
 
 ## 13. Acceptance test matrix
 
@@ -389,7 +448,9 @@ Tests must use disposable fixtures with unique test roots and app-state director
 | Concurrency | Second conflicting operation rejected; journal and payloads consistent |
 | User strings | Spaces, Unicode, quotes and shell metacharacters are data, never commands |
 | Privacy | No unexpected network calls, telemetry, secret-content previews or uploads |
-| Package smoke | Standalone app opens and completes fixture journey outside repository |
+| Terminal entry points | Installed command and repository script complete the documented fixture journey |
+| Non-interactive review | Pending proposal stored; no mutation; exit 6 and exact review command shown |
+| Terminal decisions | Keep/select/protect/cancel default safely and exact confirmation binds the digest |
 
 Use unit tests for policy/state machines, real filesystem integration tests for operations, native Windows tests for OS behavior, and UI tests for confirmation/cancellation. Avoid tests that merely repeat implementation logic.
 
@@ -420,16 +481,21 @@ Do not delete pre-existing files or classify all new/untracked files as temporar
 Use targeted .gitignore entries for environment, app/test state, logs, cache, build outputs and transient files. Do not ignore all Markdown, images, or data indiscriminately.
 
 Final repository deliverables:
-- Complete source and functioning desktop app/CLI.
+- Complete source and functioning terminal tool with one shared core.
 - Tests and Windows CI definition.
 - pyproject.toml and locked dependencies.
 - README, SAFETY.md, CODEX_WORKFLOW.md, concise VALIDATION.md.
 - This plan and completed evidence tracker.
-- Reproducible Windows packaging specification; portable package supplied separately from source commits.
+- Lightweight repository script and reproducible installable terminal command.
 
 ## 16. Definition of done
 
-All R01–R16 and M0–M11 gates satisfied for the supported Windows scope. No required TODOs, fake results, disconnected buttons, unreviewed dangerous fallbacks, or silent exceptions. The real app supports selection, review, approval, quarantine, restore, history and separately approved purge. Task integration and protected deliverables work. Native safety tests and standalone packaging have actual evidence.
+All R01–R16 and M0–M11 revised gates satisfied for the supported Windows scope. No required TODOs,
+fake results, approval bypasses, unreviewed dangerous fallbacks, or silent exceptions. The real
+terminal tool supports task start, registration/protection, explicit completion, pending preview,
+default-retain review, exact approval, quarantine, restore, history, and separately approved purge.
+Native safety tests and both terminal entry points have actual evidence. Desktop UI and PyInstaller
+results are superseded historical evidence, not release gates.
 
 Report exact setup/launch/test commands and package location. Distinguish verified, implemented-but-unverified, and blocked work. Report branch/commits and whether anything was pushed. State native platform gaps if any. Do not call an unverified build production-ready or guarantee zero data loss.
 

@@ -13,4 +13,5 @@ dist/
 .ai-cleaner-state/
 *.db-shm
 *.db-wal
-_bmad/render/
+# BMAD's installed workflow engine is machine-local; the rendered execution map is tracked.
+_bmad/
